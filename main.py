@@ -27,6 +27,7 @@ def conectar_sheets():
     ]
     import base64
     creds_raw = os.environ.get("GOOGLE_CREDENTIALS")
+    print(f"DEBUG GOOGLE_CREDENTIALS: {'OK longitud='+str(len(creds_raw)) if creds_raw else 'NONE - variable no encontrada'}")
     creds_json = json.loads(base64.b64decode(creds_raw).decode())
     creds  = Credentials.from_service_account_info(creds_json, scopes=scope)
     client = gspread.authorize(creds)
