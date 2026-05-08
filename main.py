@@ -339,4 +339,10 @@ async def main():
         return {"status": "error", "mensaje": str(e)}
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import time
+    result = asyncio.run(main())
+    print(f"Resultado: {result}")
+    print("Script terminado, esperando próxima ejecución...")
+    # Mantener el proceso vivo para Railway
+    while True:
+        time.sleep(3600)
