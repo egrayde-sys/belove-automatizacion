@@ -2,11 +2,13 @@ import asyncio
 import os
 import json
 import random
+import time
 import requests
 import pandas as pd
 from playwright.async_api import async_playwright
 from google.oauth2.service_account import Credentials
 import gspread
+import base64
 
 # ── CONFIGURACIÓN ─────────────────────────────────────────────
 EMAIL          = os.environ.get("EROSHOP_EMAIL")
@@ -25,16 +27,15 @@ def conectar_sheets():
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/drive"
     ]
-    import base64
     creds_raw = os.environ.get("GOOGLE_CREDENTIALS")
-    print(f"DEBUG GOOGLE_CREDENTIALS: {'OK longitud='+str(len(creds_raw)) if creds_raw else 'NONE - variable no encontrada'}")
-    print(f"DEBUG SHEET_NAME: '{SHEET_NAME}'")
+    print(f"DEBUG GOOGLE_CREDENTIALS: {'OK longitud='+str(len(creds_raw)) if creds_raw else 'NONE'}")
     creds_json = json.loads(base64.b64decode(creds_raw).decode())
-    creds  = Credentials.from_service_account_info(creds_json, scopes=scope)
+    creds = Credentials.from_service_account_info(creds_json, scopes=scope)
     client = gspread.authorize(creds)
+    print(f"DEBUG SHEET_NAME: '{SHEET_NAME}'")
     sheets_disponibles = [s.title for s in client.openall()]
-print(f"DEBUG Sheets disponibles: {sheets_disponibles}")
-return client.open(SHEET_NAME)
+    print(f"DEBUG Sheets disponibles: {sheets_disponibles}")
+    return client.open(SHEET_NAME)
 
 # ── SCRAPING EROSHOP ──────────────────────────────────────────
 async def crear_sesion(playwright):
@@ -46,7 +47,7 @@ async def crear_sesion(playwright):
     await page.click("input[name='commit']")
     await page.wait_for_timeout(3000)
     if "login" in page.url:
-        raise Exception("❌ Login fallido")
+        raise Exception("Login fallido")
     print(f"✅ Login exitoso — {page.url}")
     return browser, page
 
@@ -98,13 +99,9 @@ async def extraer_producto(page, url):
 async def scraping_eroshop():
     async with async_playwright() as pw:
         browser, page = await crear_sesion(pw)
-
-        # Detectar páginas
-        TOTAL_PAGINAS = 20
+        TOTAL_PAGINAS = 16
         print(f"📄 Total páginas: {TOTAL_PAGINAS}")
 
-        # Recolectar URLs
-        print(f"\n📋 Recorriendo {TOTAL_PAGINAS} páginas...")
         product_urls = []
         for pg in range(1, TOTAL_PAGINAS + 1):
             url = f"{BASE_URL}/catalogo" if pg == 1 else f"{BASE_URL}/catalogo?page={pg}"
@@ -120,7 +117,6 @@ async def scraping_eroshop():
                         product_urls.append(href)
             print(f"  Página {pg}/{TOTAL_PAGINAS} → acumulado: {len(product_urls)}")
 
-        # Extraer datos
         print(f"\n🔍 Extrayendo {len(product_urls)} productos...")
         productos = []
         for i, url in enumerate(product_urls, 1):
@@ -151,9 +147,8 @@ async def scraping_eroshop():
         df["stock"] = pd.to_numeric(df["stock"], errors="coerce").fillna(0).astype(int)
         df["precio_neto"] = pd.to_numeric(df["precio_neto"], errors="coerce").fillna(0).astype(int)
 
-        # Validación calidad
         total = len(df)
-        sin_sku    = df[df["sku"] == ""].shape[0]
+        sin_sku = df[df["sku"] == ""].shape[0]
         sin_precio = df[df["precio_neto"] == 0].shape[0]
         alertas = []
         if sin_sku / total > UMBRAL_CALIDAD:
@@ -166,17 +161,14 @@ async def scraping_eroshop():
 
 # ── CRUCE Y EXPORTAR ──────────────────────────────────────────
 def procesar_cruce(df_eroshop, sheet):
-    # Belove
     df_belove = pd.DataFrame(requests.get(URL_BELOVE).json())
     df_belove["sku"] = df_belove["sku"].astype(str).str.strip()
     df_eroshop["sku"] = df_eroshop["sku"].astype(str).str.strip()
 
-    # Costos especiales
     ws_costos = sheet.worksheet("costos_especiales")
     df_costos = pd.DataFrame(ws_costos.get_all_records())
     df_costos["sku"] = df_costos["sku"].astype(str).str.strip()
 
-    # Agregar productos China
     skus_eroshop = set(df_eroshop["sku"])
     df_costos_nuevos = df_costos[~df_costos["sku"].isin(skus_eroshop)].copy()
     if len(df_costos_nuevos) > 0:
@@ -187,7 +179,6 @@ def procesar_cruce(df_eroshop, sheet):
         df_eroshop["origen"] = "eroshop"
         df_eroshop = pd.concat([df_eroshop, df_china], ignore_index=True)
 
-    # Merge
     df_cruce = df_eroshop.merge(
         df_belove[["sku", "id", "precio", "precio_descuento", "stock"]],
         on="sku", how="left", suffixes=("_eroshop", "_belove")
@@ -199,19 +190,16 @@ def procesar_cruce(df_eroshop, sheet):
         "stock_belove": "stock_belove",
     })
 
-    # Subir eroshop_raw
-    df_raw = df_eroshop[["nombre", "sku", "stock", "precio_neto"]].fillna("")
+    df_raw = df_eroshop[["nombre", "sku", "stock", "precio_neto"]].fillna("") if "precio_neto" in df_eroshop.columns else df_eroshop[["nombre", "sku", "stock"]].fillna("")
     ws_raw = sheet.worksheet("eroshop_raw")
     ws_raw.clear()
-    ws_raw.update(range_name="A1", values=[df_raw.columns.tolist()] + df_raw.values.tolist())
+    ws_raw.update(range_name="A1", values=[["nombre","sku","stock","precio_neto"]] + df_eroshop[["nombre","sku","stock","precio_neto"]].fillna("").values.tolist())
 
-    # Subir belove_raw
     df_belove_raw = df_belove[["sku", "precio", "precio_descuento", "stock"]].fillna("")
     ws_belove = sheet.worksheet("belove_raw")
     ws_belove.clear()
     ws_belove.update(range_name="A1", values=[df_belove_raw.columns.tolist()] + df_belove_raw.values.tolist())
 
-    # Subir cruce con fórmulas
     encabezados = [
         "sku", "nombre", "costo_neto", "costo_bruto", "precio_calculado",
         "precio_actual_belove", "precio_descuento_belove", "stock_eroshop", "stock_belove",
@@ -243,7 +231,6 @@ def procesar_cruce(df_eroshop, sheet):
     ws_cruce.clear()
     ws_cruce.update(range_name="A1", values=[encabezados] + filas, value_input_option="USER_ENTERED")
 
-    # Leer cruce procesado y exportar
     data_cruce = ws_cruce.get_all_records()
     df_resultado = pd.DataFrame(data_cruce)
 
@@ -313,27 +300,23 @@ async def main():
     alertas = []
 
     try:
-        # 1. Conectar Sheets
         sheet = conectar_sheets()
         print("✅ Conectado a Google Sheets")
 
-        # 2. Scraping
         df_eroshop, alertas_scraping = await scraping_eroshop()
         alertas.extend(alertas_scraping)
 
-        # 3. Cruce y exportar
         df_exportar, resumen = procesar_cruce(df_eroshop, sheet)
         print(f"📊 Resumen: {resumen}")
 
-        # 4. Actualizar Gist
         url_json = actualizar_gist(df_exportar)
 
         print("\n✅ Automatización completada exitosamente")
-        print(f"   Total productos: {resumen['total_productos']}")
-        print(f"   Cambio precio:   {resumen['cambio_precio']}")
-        print(f"   Cambio stock:    {resumen['cambio_stock']}")
-        print(f"   Productos nuevos:{resumen['productos_nuevos']}")
-        print(f"   A actualizar:    {resumen['a_actualizar']}")
+        print(f"   Total productos:  {resumen['total_productos']}")
+        print(f"   Cambio precio:    {resumen['cambio_precio']}")
+        print(f"   Cambio stock:     {resumen['cambio_stock']}")
+        print(f"   Productos nuevos: {resumen['productos_nuevos']}")
+        print(f"   A actualizar:     {resumen['a_actualizar']}")
 
         return {"status": "ok", "resumen": resumen, "alertas": alertas}
 
@@ -342,11 +325,8 @@ async def main():
         return {"status": "error", "mensaje": str(e)}
 
 if __name__ == "__main__":
-    import time
     result = asyncio.run(main())
     print(f"Resultado: {result}")
     print("Script terminado, esperando próxima ejecución...")
-    # Mantener el proceso vivo para Railway
     while True:
         time.sleep(3600)
-
