@@ -52,7 +52,7 @@ async def crear_sesion(playwright):
     return browser, page
 
 async def extraer_producto(page, url):
-    await page.goto(url)
+    await page.goto(url, timeout=60000)
     await page.wait_for_timeout(DELAY)
 
     nombre = ""
