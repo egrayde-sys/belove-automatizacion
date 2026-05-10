@@ -28,10 +28,13 @@ def conectar_sheets():
     import base64
     creds_raw = os.environ.get("GOOGLE_CREDENTIALS")
     print(f"DEBUG GOOGLE_CREDENTIALS: {'OK longitud='+str(len(creds_raw)) if creds_raw else 'NONE - variable no encontrada'}")
+    print(f"DEBUG SHEET_NAME: '{SHEET_NAME}'")
     creds_json = json.loads(base64.b64decode(creds_raw).decode())
     creds  = Credentials.from_service_account_info(creds_json, scopes=scope)
     client = gspread.authorize(creds)
-    return client.open(SHEET_NAME)
+    sheets_disponibles = [s.title for s in client.openall()]
+print(f"DEBUG Sheets disponibles: {sheets_disponibles}")
+return client.open(SHEET_NAME)
 
 # ── SCRAPING EROSHOP ──────────────────────────────────────────
 async def crear_sesion(playwright):
