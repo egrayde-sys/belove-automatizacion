@@ -270,6 +270,13 @@ def procesar_cruce(df_eroshop, sheet):
     df_actualizar["precio_descuento_final"] = df_actualizar["precio_descuento"].apply(lambda x: int(x) if x else 0)
     df_actualizar["stock_final"] = df_actualizar["stock_eroshop"].apply(lambda x: int(x) if x else 0)
 
+    print(f"DEBUG df_actualizar dtypes:\n{df_actualizar.dtypes}")
+    for col in ["precio_final", "precio_descuento_final", "stock_final"]:
+        vals = df_actualizar[col].tolist()
+        problemas = [v for v in vals if str(v) in ["nan", "inf", "-inf"] or (isinstance(v, float) and (v != v or abs(v) == float('inf')))]
+        if problemas:
+            print(f"DEBUG {col} tiene {len(problemas)} valores problemáticos: {problemas[:5]}")
+   
     df_exportar = df_actualizar[["id", "sku", "precio_final", "precio_descuento_final", "stock_final"]].copy()
     df_exportar.columns = ["id", "sku", "precio", "precio_descuento", "stock"]
     df_exportar = df_exportar.fillna("")
