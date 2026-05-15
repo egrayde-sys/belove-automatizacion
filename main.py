@@ -9,6 +9,23 @@ from playwright.async_api import async_playwright
 from google.oauth2.service_account import Credentials
 import gspread
 import base64
+SLACK_TOKEN   = os.environ.get("SLACK_TOKEN")
+SLACK_CHANNEL = os.environ.get("SLACK_CHANNEL", "#belove")
+
+def enviar_slack(mensaje):
+    try:
+        resp = requests.post(
+            "https://slack.com/api/chat.postMessage",
+            headers={"Authorization": f"Bearer {SLACK_TOKEN}"},
+            json={"channel": SLACK_CHANNEL, "text": mensaje}
+        )
+        data = resp.json()
+        if data.get("ok"):
+            print(f"✅ Slack enviado")
+        else:
+            print(f"⚠️ Slack error: {data.get('error')}")
+    except Exception as e:
+        print(f"⚠️ Slack excepción: {e}")
 
 # ── CONFIGURACIÓN ─────────────────────────────────────────────
 EMAIL          = os.environ.get("EROSHOP_EMAIL")
@@ -319,11 +336,20 @@ async def main():
         print(f"   Cambio stock:     {resumen['cambio_stock']}")
         print(f"   Productos nuevos: {resumen['productos_nuevos']}")
         print(f"   A actualizar:     {resumen['a_actualizar']}")
+        enviar_slack(
+            f"✅ *Automatización Belove completada*\n"
+            f"📦 Total productos: {resumen['total_productos']}\n"
+            f"💰 Cambio precio: {resumen['cambio_precio']}\n"
+            f"📊 Cambio stock: {resumen['cambio_stock']}\n"
+            f"🆕 Productos nuevos: {resumen['productos_nuevos']}\n"
+            f"🔄 A actualizar: {resumen['a_actualizar']}"
+        )
 
         return {"status": "ok", "resumen": resumen, "alertas": alertas}
 
     except Exception as e:
         print(f"\n❌ Error: {e}")
+        enviar_slack(f"❌ *Error en automatización Belove*\n{str(e)}")
         return {"status": "error", "mensaje": str(e)}
 
 if __name__ == "__main__":
