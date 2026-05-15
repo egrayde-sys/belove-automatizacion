@@ -269,7 +269,7 @@ def procesar_cruce(df_eroshop, sheet):
 
 # ── ACTUALIZAR GIST ───────────────────────────────────────────
 def actualizar_gist(df_exportar):
-        df_exportar = df_exportar.replace([float('inf'), float('-inf')], None)
+    df_exportar = df_exportar.replace([float('inf'), float('-inf')], None)
     df_exportar = df_exportar.where(pd.notnull(df_exportar), None)
     exportar_json = df_exportar.to_dict(orient="records")
     for item in exportar_json:
