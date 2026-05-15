@@ -282,6 +282,12 @@ def procesar_cruce(df_eroshop, sheet):
         "a_actualizar": len(df_exportar),
     }
 
+    print(f"DEBUG df_exportar dtypes:\n{df_exportar.dtypes}")
+    print(f"DEBUG df_exportar sample:\n{df_exportar.head(3).to_string()}")
+    for col in df_exportar.columns:
+        problemas = df_exportar[col].apply(lambda x: not isinstance(x, (int, str, type(None))) and (x != x or x == float('inf') or x == float('-inf'))).sum()
+        if problemas > 0:
+            print(f"DEBUG columna problemática: {col} — {problemas} valores")
     return df_exportar, resumen
 
 # ── ACTUALIZAR GIST ───────────────────────────────────────────
