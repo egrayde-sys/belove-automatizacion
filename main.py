@@ -247,9 +247,19 @@ def procesar_cruce(df_eroshop, sheet):
     ws_cruce = sheet.worksheet("cruce")
     ws_cruce.clear()
     ws_cruce.update(range_name="A1", values=[encabezados] + filas, value_input_option="USER_ENTERED")
-
+    print("DEBUG cruce subido OK")
+    
     data_cruce = ws_cruce.get_all_records()
     df_resultado = pd.DataFrame(data_cruce)
+    print(f"DEBUG df_resultado shape: {df_resultado.shape}")
+    print(f"DEBUG df_resultado dtypes:\n{df_resultado.dtypes}")
+    
+    # Limpiar valores problemáticos
+    for col in df_resultado.columns:
+        df_resultado[col] = pd.to_numeric(df_resultado[col], errors='ignore')
+    df_resultado = df_resultado.replace([float('inf'), float('-inf')], 0)
+    df_resultado = df_resultado.fillna(0)
+    print("DEBUG limpieza OK")
 
     df_actualizar = df_resultado[
         (df_resultado["cambio_precio"] == "SÍ") |
