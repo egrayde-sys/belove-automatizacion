@@ -259,10 +259,14 @@ def procesar_cruce(df_eroshop, sheet):
     ws_cruce.update(range_name="A1", values=[encabezados] + filas, value_input_option="USER_ENTERED")
     print("DEBUG cruce subido OK")
     
-    data_cruce = ws_cruce.get_all_records()
+    data_cruce = ws_cruce.get_all_records(value_render_option='UNFORMATTED_VALUE', expected_headers=[])
     df_resultado = pd.DataFrame(data_cruce)
     print(f"DEBUG df_resultado shape: {df_resultado.shape}")
-    print(f"DEBUG df_resultado dtypes:\n{df_resultado.dtypes}")
+    # Limpiar errores de fórmulas de Sheets
+    df_resultado = df_resultado.replace(['#DIV/0!', '#ERROR!', '#N/A', '#VALUE!', '#REF!', '#NAME?'], 0)
+    df_resultado = df_resultado.replace([float('inf'), float('-inf')], 0)
+    df_resultado = df_resultado.fillna(0)
+    print("DEBUG df_resultado limpio OK")
     
     # Limpiar valores problemáticos
     for col in df_resultado.columns:
