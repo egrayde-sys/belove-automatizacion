@@ -302,9 +302,10 @@ def procesar_cruce(df_eroshop, sheet):
     df_actualizar = df_actualizar.merge(df_belove_ids[["id","sku"]], on="sku", how="left")
     sin_id = df_actualizar["id"].isna() | (df_actualizar["id"] == 0)
     if sin_id.sum() > 0:
-        df_sin_id = df_actualizar[sin_id].drop(columns=["id"])
+        df_sin_id = df_actualizar[sin_id][["sku_norm"]].copy().reset_index(drop=True)
         df_con_id = df_sin_id.merge(df_belove_ids[["id","sku_norm"]], on="sku_norm", how="left")
-        df_actualizar.loc[sin_id, "id"] = df_con_id["id"].values
+        df_actualizar = df_actualizar.reset_index(drop=True)
+        df_actualizar.loc[sin_id.values, "id"] = df_con_id["id"].values
     df_actualizar["id"] = pd.to_numeric(df_actualizar["id"], errors="coerce").fillna(0).astype(int)
 
     def calcular_precio(row):
