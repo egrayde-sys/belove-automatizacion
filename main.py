@@ -163,6 +163,10 @@ async def scraping_eroshop():
         df = pd.DataFrame(productos)
         df["stock"] = pd.to_numeric(df["stock"], errors="coerce").fillna(0).astype(int)
         df["precio_neto"] = pd.to_numeric(df["precio_neto"], errors="coerce").fillna(0).astype(int)
+        df = df.replace([float('inf'), float('-inf')], 0)
+        df = df.fillna("")
+        print(f"DEBUG df scraping dtypes: {df.dtypes.to_dict()}")
+        print(f"DEBUG df scraping sample: {df[['sku','stock','precio_neto']].head(3).to_string()}")
 
         total = len(df)
         sin_sku = df[df["sku"] == ""].shape[0]
