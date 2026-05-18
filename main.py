@@ -256,7 +256,20 @@ def procesar_cruce(df_eroshop, sheet):
 
     ws_cruce = sheet.worksheet("cruce")
     ws_cruce.clear()
-    ws_cruce.update(range_name="A1", values=[encabezados] + filas, value_input_option="USER_ENTERED")
+    # Limpiar filas antes de subir
+    filas_limpias = []
+    for fila in filas:
+        fila_limpia = []
+        for v in fila:
+            if isinstance(v, float) and (v != v or v == float('inf') or v == float('-inf')):
+                fila_limpia.append(0)
+            elif v is None:
+                fila_limpia.append("")
+            else:
+                fila_limpia.append(v)
+        filas_limpias.append(fila_limpia)
+    print("DEBUG filas limpias OK")
+    ws_cruce.update(range_name="A1", values=[encabezados] + filas_limpias, value_input_option="USER_ENTERED")
     print("DEBUG cruce subido OK")
     
     data_cruce = ws_cruce.get_all_records(value_render_option='UNFORMATTED_VALUE', expected_headers=[])
