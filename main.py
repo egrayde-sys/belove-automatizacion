@@ -293,7 +293,18 @@ def procesar_cruce(df_eroshop, sheet):
         (df_resultado["cambio_stock"] == "SÍ")
     ].copy()
 
-    df_actualizar = df_actualizar.merge(df_belove[["id", "sku"]], on="sku", how="left")
+    # Normalizar SKUs para match con/sin guión
+    df_belove_ids = df_belove[["id", "sku"]].copy()
+    df_belove_ids["sku_norm"] = df_belove_ids["sku"].str.replace("-","").str.upper()
+    df_actualizar["sku_norm"] = df_actualizar["sku"].astype(str).str.replace("-","").str.upper()
+    
+    # Merge primero exacto, luego normalizado
+    df_actualizar = df_actualizar.merge(df_belove_ids[["id","sku"]], on="sku", how="left")
+    sin_id = df_actualizar["id"].isna() | (df_actualizar["id"] == 0)
+    if sin_id.sum() > 0:
+        df_sin_id = df_actualizar[sin_id].drop(columns=["id"])
+        df_con_id = df_sin_id.merge(df_belove_ids[["id","sku_norm"]], on="sku_norm", how="left")
+        df_actualizar.loc[sin_id, "id"] = df_con_id["id"].values
     df_actualizar["id"] = pd.to_numeric(df_actualizar["id"], errors="coerce").fillna(0).astype(int)
 
     def calcular_precio(row):
