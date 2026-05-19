@@ -117,11 +117,11 @@ async def extraer_producto(page, url):
 async def scraping_eroshop():
     async with async_playwright() as pw:
         browser, page = await crear_sesion(pw)
-        TOTAL_PAGINAS = 16
-        print(f"📄 Total páginas: {TOTAL_PAGINAS}")
-
+        print(f"📄 Recorriendo catálogo y fabricante...")
         product_urls = []
-        for pg in range(1, TOTAL_PAGINAS + 1):
+
+        # Scraping 1: /catalogo (15 páginas)
+        for pg in range(1, 16):
             url = f"{BASE_URL}/catalogo" if pg == 1 else f"{BASE_URL}/catalogo?page={pg}"
             await page.goto(url)
             await page.wait_for_timeout(DELAY)
@@ -133,7 +133,38 @@ async def scraping_eroshop():
                         href = BASE_URL + href
                     if href not in product_urls:
                         product_urls.append(href)
-            print(f"  Página {pg}/{TOTAL_PAGINAS} → acumulado: {len(product_urls)}")
+            print(f"  Catálogo página {pg}/15 → acumulado: {len(product_urls)}")
+
+        print(f"✅ Catálogo: {len(product_urls)} URLs")
+
+        # Scraping 2: /fabricante (13 páginas)
+        urls_antes = len(product_urls)
+        for pg in range(1, 14):
+            url = f"{BASE_URL}/fabricante" if pg == 1 else f"{BASE_URL}/fabricante?page={pg}"
+            await page.goto(url)
+            await page.wait_for_timeout(DELAY)
+            links = await page.query_selector_all("h3 a")
+            for link in links:
+                href = await link.get_attribute("href")
+                if href:
+                    if href.startswith("/"):
+                        href = BASE_URL + href
+                    if href not in product_urls:
+                        product_urls.append(href)
+            print(f"  Fabricante página {pg}/13 → acumulado: {len(product_urls)}")
+
+        print(f"✅ Fabricante agregó: {len(product_urls) - urls_antes} URLs nuevas")
+            await page.goto(url)
+            await page.wait_for_timeout(DELAY)
+            links = await page.query_selector_all("h3 a")
+            for link in links:
+                href = await link.get_attribute("href")
+                if href:
+                    if href.startswith("/"):
+                        href = BASE_URL + href
+                    if href not in product_urls:
+                        product_urls.append(href)
+        
 
         print(f"\n🔍 Extrayendo {len(product_urls)} productos...")
         productos = []
