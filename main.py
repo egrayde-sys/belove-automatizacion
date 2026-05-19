@@ -117,14 +117,8 @@ async def extraer_producto(page, url):
 async def scraping_eroshop():
     async with async_playwright() as pw:
         browser, page = await crear_sesion(pw)
-        print(f"📄 Recorriendo catálogo y fabricante...")
-        product_urls = []
 
-        async def scraping_eroshop():
-    async with async_playwright() as pw:
-        browser, page = await crear_sesion(pw)
-
-        print(f"📄 Recorriendo catálogo y fabricante...")
+        print("📄 Recorriendo catálogo y fabricante...")
         product_urls = []
 
         # Scraping 1: /catalogo (15 páginas)
@@ -193,10 +187,8 @@ async def scraping_eroshop():
         df["precio_neto"] = pd.to_numeric(df["precio_neto"], errors="coerce").fillna(0).astype(int)
         df = df.replace([float('inf'), float('-inf')], 0)
         df = df.fillna("")
-
-        # Deduplicar por SKU
         df = df[df["sku"] != ""].drop_duplicates(subset=["sku"], keep="first")
-        print(f"DEBUG df scraping dtypes: {df.dtypes.to_dict()}")
+
         print(f"DEBUG df scraping sample: {df[['sku','stock','precio_neto']].head(3).to_string()}")
 
         total = len(df)
@@ -322,11 +314,8 @@ def procesar_cruce(df_eroshop, sheet):
     df_resultado = df_resultado.fillna(0)
     print("DEBUG limpieza OK")
 
-    # Filtrar productos a actualizar
-    df_actualizar = df_resultado[
-        (df_resultado["cambio_precio"] == "SÍ") |
-        (df_resultado["cambio_stock"] == "SÍ")
-    ].copy().reset_index(drop=True)
+    # Exportar TODOS los productos
+    df_todos = df_resultado.copy().reset_index(drop=True)
 
     # Buscar ID en Belove normalizando SKU con/sin guión
     def buscar_id_belove(sku):
@@ -340,7 +329,7 @@ def procesar_cruce(df_eroshop, sheet):
             return int(match.iloc[0]["id"])
         return 0
 
-    df_actualizar["id"] = df_actualizar["sku"].apply(buscar_id_belove)
+    df_todos["id"] = df_todos["sku"].apply(buscar_id_belove)
 
     # Calcular precios
     def calcular_precio(row):
@@ -350,11 +339,11 @@ def procesar_cruce(df_eroshop, sheet):
             return int((precio_descuento * (1 + pct) // 1000) * 1000 + 990)
         return int(row["precio_actual_belove"]) if row["precio_actual_belove"] else precio_descuento
 
-    df_actualizar["precio_final"] = df_actualizar.apply(calcular_precio, axis=1)
-    df_actualizar["precio_descuento_final"] = df_actualizar["precio_descuento"].apply(lambda x: int(x) if x else 0)
-    df_actualizar["stock_final"] = df_actualizar["stock_eroshop"].apply(lambda x: int(x) if x else 0)
+    df_todos["precio_final"] = df_todos.apply(calcular_precio, axis=1)
+    df_todos["precio_descuento_final"] = df_todos["precio_descuento"].apply(lambda x: int(x) if x else 0)
+    df_todos["stock_final"] = df_todos["stock_eroshop"].apply(lambda x: int(x) if x else 0)
 
-    df_exportar = df_actualizar[["id", "sku", "precio_final", "precio_descuento_final", "stock_final"]].copy()
+    df_exportar = df_todos[["id", "sku", "precio_final", "precio_descuento_final", "stock_final"]].copy()
     df_exportar.columns = ["id", "sku", "precio", "precio_descuento", "stock"]
     df_exportar = df_exportar.fillna(0)
 
