@@ -120,6 +120,13 @@ async def scraping_eroshop():
         print(f"📄 Recorriendo catálogo y fabricante...")
         product_urls = []
 
+        async def scraping_eroshop():
+    async with async_playwright() as pw:
+        browser, page = await crear_sesion(pw)
+
+        print(f"📄 Recorriendo catálogo y fabricante...")
+        product_urls = []
+
         # Scraping 1: /catalogo (15 páginas)
         for pg in range(1, 16):
             url = f"{BASE_URL}/catalogo" if pg == 1 else f"{BASE_URL}/catalogo?page={pg}"
@@ -154,19 +161,8 @@ async def scraping_eroshop():
             print(f"  Fabricante página {pg}/13 → acumulado: {len(product_urls)}")
 
         print(f"✅ Fabricante agregó: {len(product_urls) - urls_antes} URLs nuevas")
-            await page.goto(url)
-            await page.wait_for_timeout(DELAY)
-            links = await page.query_selector_all("h3 a")
-            for link in links:
-                href = await link.get_attribute("href")
-                if href:
-                    if href.startswith("/"):
-                        href = BASE_URL + href
-                    if href not in product_urls:
-                        product_urls.append(href)
-        
-
         print(f"\n🔍 Extrayendo {len(product_urls)} productos...")
+
         productos = []
         for i, url in enumerate(product_urls, 1):
             intentos = 0
@@ -197,6 +193,9 @@ async def scraping_eroshop():
         df["precio_neto"] = pd.to_numeric(df["precio_neto"], errors="coerce").fillna(0).astype(int)
         df = df.replace([float('inf'), float('-inf')], 0)
         df = df.fillna("")
+
+        # Deduplicar por SKU
+        df = df[df["sku"] != ""].drop_duplicates(subset=["sku"], keep="first")
         print(f"DEBUG df scraping dtypes: {df.dtypes.to_dict()}")
         print(f"DEBUG df scraping sample: {df[['sku','stock','precio_neto']].head(3).to_string()}")
 
@@ -204,12 +203,13 @@ async def scraping_eroshop():
         sin_sku = df[df["sku"] == ""].shape[0]
         sin_precio = df[df["precio_neto"] == 0].shape[0]
         alertas = []
-        if sin_sku / total > UMBRAL_CALIDAD:
-            alertas.append(f"🚨 {sin_sku} productos sin SKU ({sin_sku/total:.0%})")
-        if sin_precio / total > UMBRAL_CALIDAD:
-            alertas.append(f"🚨 {sin_precio} productos sin precio ({sin_precio/total:.0%})")
+        if total > 0:
+            if sin_sku / total > UMBRAL_CALIDAD:
+                alertas.append(f"🚨 {sin_sku} productos sin SKU ({sin_sku/total:.0%})")
+            if sin_precio / total > UMBRAL_CALIDAD:
+                alertas.append(f"🚨 {sin_precio} productos sin precio ({sin_precio/total:.0%})")
 
-        print(f"\n✅ Scraping completo: {total} productos")
+        print(f"\n✅ Scraping completo: {total} productos únicos")
         return df, alertas
 
 # ── CRUCE Y EXPORTAR ──────────────────────────────────────────
