@@ -138,7 +138,7 @@ async def scraping_eroshop():
 
         print(f"✅ Catálogo: {len(product_urls)} URLs")
 
-       # Scraping 2: /fabricante (13 páginas)
+        # Scraping 2: /fabricante (13 páginas)
         urls_antes = len(product_urls)
         for pg in range(1, 14):
             url = f"{BASE_URL}/fabricante" if pg == 1 else f"{BASE_URL}/fabricante?page={pg}"
