@@ -138,16 +138,16 @@ async def scraping_eroshop():
 
         print(f"✅ Catálogo: {len(product_urls)} URLs")
 
-        # Scraping 2: /fabricante (13 páginas)
+       # Scraping 2: /fabricante (13 páginas)
         urls_antes = len(product_urls)
         for pg in range(1, 14):
             url = f"{BASE_URL}/fabricante" if pg == 1 else f"{BASE_URL}/fabricante?page={pg}"
             await page.goto(url)
             await page.wait_for_timeout(DELAY)
-            links = await page.query_selector_all("h3 a")
+            links = await page.query_selector_all(".product-block a")
             for link in links:
                 href = await link.get_attribute("href")
-                if href:
+                if href and not href.endswith((".jpg", ".png", ".gif")):
                     if href.startswith("/"):
                         href = BASE_URL + href
                     if href not in product_urls:
