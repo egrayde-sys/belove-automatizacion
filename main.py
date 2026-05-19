@@ -9,25 +9,10 @@ from playwright.async_api import async_playwright
 from google.oauth2.service_account import Credentials
 import gspread
 import base64
-SLACK_TOKEN   = os.environ.get("SLACK_TOKEN")
-SLACK_CHANNEL = os.environ.get("SLACK_CHANNEL", "#belove")
-
-def enviar_slack(mensaje):
-    try:
-        resp = requests.post(
-            "https://slack.com/api/chat.postMessage",
-            headers={"Authorization": f"Bearer {SLACK_TOKEN}"},
-            json={"channel": SLACK_CHANNEL, "text": mensaje}
-        )
-        data = resp.json()
-        if data.get("ok"):
-            print(f"✅ Slack enviado")
-        else:
-            print(f"⚠️ Slack error: {data.get('error')}")
-    except Exception as e:
-        print(f"⚠️ Slack excepción: {e}")
 
 # ── CONFIGURACIÓN ─────────────────────────────────────────────
+SLACK_TOKEN    = os.environ.get("SLACK_TOKEN")
+SLACK_CHANNEL  = os.environ.get("SLACK_CHANNEL", "#belove")
 EMAIL          = os.environ.get("EROSHOP_EMAIL")
 PASSWORD       = os.environ.get("EROSHOP_PASSWORD")
 BASE_URL       = "https://www.eroshopmayorista.cl"
@@ -38,7 +23,23 @@ GIST_ID        = "c6a5fca73c46f6a98bef5f47dc8ff123"
 SHEET_NAME     = "Belove - Automatización"
 URL_BELOVE     = "https://belove.cl/ws/json_productos.php?token=WGRjRWs1WHU1dWdRZ1VCeHV0YVo="
 
-# ── CONECTAR GOOGLE SHEETS ────────────────────────────────────
+# ── SLACK ─────────────────────────────────────────────────────
+def enviar_slack(mensaje):
+    try:
+        resp = requests.post(
+            "https://slack.com/api/chat.postMessage",
+            headers={"Authorization": f"Bearer {SLACK_TOKEN}"},
+            json={"channel": SLACK_CHANNEL, "text": mensaje}
+        )
+        data = resp.json()
+        if data.get("ok"):
+            print("✅ Slack enviado")
+        else:
+            print(f"⚠️ Slack error: {data.get('error')}")
+    except Exception as e:
+        print(f"⚠️ Slack excepción: {e}")
+
+# ── GOOGLE SHEETS ─────────────────────────────────────────────
 def conectar_sheets():
     scope = [
         "https://spreadsheets.google.com/feeds",
@@ -54,7 +55,7 @@ def conectar_sheets():
     print(f"DEBUG Sheets disponibles: {sheets_disponibles}")
     return client.open(SHEET_NAME)
 
-# ── SCRAPING EROSHOP ──────────────────────────────────────────
+# ── SCRAPING ──────────────────────────────────────────────────
 async def crear_sesion(playwright):
     browser = await playwright.chromium.launch(headless=True)
     page = await browser.new_page()
@@ -211,22 +212,24 @@ def procesar_cruce(df_eroshop, sheet):
         "stock_belove": "stock_belove",
     })
 
-    df_raw = df_eroshop[["nombre", "sku", "stock", "precio_neto"]].fillna("") if "precio_neto" in df_eroshop.columns else df_eroshop[["nombre", "sku", "stock"]].fillna("")
+    # Subir eroshop_raw
     ws_raw = sheet.worksheet("eroshop_raw")
     ws_raw.clear()
-    df_eroshop_upload = df_eroshop[["nombre","sku","stock","precio_neto"]].copy()
+    df_eroshop_upload = df_eroshop[["nombre", "sku", "stock", "precio_neto"]].copy()
     df_eroshop_upload = df_eroshop_upload.replace([float('inf'), float('-inf')], 0)
     df_eroshop_upload = df_eroshop_upload.fillna("")
     df_eroshop_upload = df_eroshop_upload.astype(str)
     print("DEBUG subiendo eroshop_raw...")
-    ws_raw.update(range_name="A1", values=[["nombre","sku","stock","precio_neto"]] + df_eroshop_upload.values.tolist())
+    ws_raw.update(range_name="A1", values=[["nombre", "sku", "stock", "precio_neto"]] + df_eroshop_upload.values.tolist())
     print("DEBUG eroshop_raw OK")
 
+    # Subir belove_raw
     df_belove_raw = df_belove[["sku", "precio", "precio_descuento", "stock"]].fillna("")
     ws_belove = sheet.worksheet("belove_raw")
     ws_belove.clear()
     ws_belove.update(range_name="A1", values=[df_belove_raw.columns.tolist()] + df_belove_raw.values.tolist())
 
+    # Subir cruce con fórmulas
     encabezados = [
         "sku", "nombre", "costo_neto", "costo_bruto", "precio_calculado",
         "precio_actual_belove", "precio_descuento_belove", "stock_eroshop", "stock_belove",
@@ -237,11 +240,11 @@ def procesar_cruce(df_eroshop, sheet):
     filas = []
     for i, (_, row) in enumerate(df_cruce.iterrows(), start=2):
         fila = [
-            row.get("sku",""), row.get("nombre",""), row.get("costo_neto",""),
+            row.get("sku", ""), row.get("nombre", ""), row.get("costo_neto", ""),
             f"=IF(ISERROR(VLOOKUP(A{i};costos_especiales!$A:$B;2;0));ROUND(C{i}*config!$B$2;0);VLOOKUP(A{i};costos_especiales!$A:$B;2;0))",
             f"=FLOOR(D{i}*config!$B$3;1000)+990",
-            row.get("precio_actual_belove",""), row.get("precio_descuento_belove",""),
-            row.get("stock_eroshop",""), row.get("stock_belove",""),
+            row.get("precio_actual_belove", ""), row.get("precio_descuento_belove", ""),
+            row.get("stock_eroshop", ""), row.get("stock_belove", ""),
             f'=IF(E{i}<>G{i};"SÍ";"NO")',
             f'=IF(H{i}<>I{i};"SÍ";"NO")',
             f'=IF(ISERROR(VLOOKUP(A{i};belove_raw!A:A;1;0));"NUEVO";"EXISTE")',
@@ -254,9 +257,6 @@ def procesar_cruce(df_eroshop, sheet):
         ]
         filas.append(fila)
 
-    ws_cruce = sheet.worksheet("cruce")
-    ws_cruce.clear()
-    # Limpiar filas antes de subir
     filas_limpias = []
     for fila in filas:
         fila_limpia = []
@@ -268,46 +268,50 @@ def procesar_cruce(df_eroshop, sheet):
             else:
                 fila_limpia.append(v)
         filas_limpias.append(fila_limpia)
+
     print("DEBUG filas limpias OK")
+    ws_cruce = sheet.worksheet("cruce")
+    ws_cruce.clear()
     ws_cruce.update(range_name="A1", values=[encabezados] + filas_limpias, value_input_option="USER_ENTERED")
     print("DEBUG cruce subido OK")
-    
+
+    # Leer cruce procesado
     data_cruce = ws_cruce.get_all_records(value_render_option='UNFORMATTED_VALUE', expected_headers=[])
     df_resultado = pd.DataFrame(data_cruce)
     print(f"DEBUG df_resultado shape: {df_resultado.shape}")
-    # Limpiar errores de fórmulas de Sheets
     df_resultado = df_resultado.replace(['#DIV/0!', '#ERROR!', '#N/A', '#VALUE!', '#REF!', '#NAME?'], 0)
     df_resultado = df_resultado.replace([float('inf'), float('-inf')], 0)
     df_resultado = df_resultado.fillna(0)
-    print("DEBUG df_resultado limpio OK")
-    
-    # Limpiar valores problemáticos
     for col in df_resultado.columns:
-        df_resultado[col] = pd.to_numeric(df_resultado[col], errors='ignore')
+        try:
+            df_resultado[col] = pd.to_numeric(df_resultado[col])
+        except:
+            pass
     df_resultado = df_resultado.replace([float('inf'), float('-inf')], 0)
     df_resultado = df_resultado.fillna(0)
     print("DEBUG limpieza OK")
 
+    # Filtrar productos a actualizar
     df_actualizar = df_resultado[
         (df_resultado["cambio_precio"] == "SÍ") |
         (df_resultado["cambio_stock"] == "SÍ")
-    ].copy()
+    ].copy().reset_index(drop=True)
 
-    # Normalizar SKUs para match con/sin guión
-    df_belove_ids = df_belove[["id", "sku"]].copy()
-    df_belove_ids["sku_norm"] = df_belove_ids["sku"].str.replace("-","").str.upper()
-    df_actualizar["sku_norm"] = df_actualizar["sku"].astype(str).str.replace("-","").str.upper()
-    
-    # Merge primero exacto, luego normalizado
-    df_actualizar = df_actualizar.merge(df_belove_ids[["id","sku"]], on="sku", how="left")
-    sin_id = df_actualizar["id"].isna() | (df_actualizar["id"] == 0)
-    if sin_id.sum() > 0:
-        df_sin_id = df_actualizar[sin_id][["sku_norm"]].copy().reset_index(drop=True)
-        df_con_id = df_sin_id.merge(df_belove_ids[["id","sku_norm"]], on="sku_norm", how="left")
-        df_actualizar = df_actualizar.reset_index(drop=True)
-        df_actualizar.loc[sin_id.values, "id"] = df_con_id["id"].values
-    df_actualizar["id"] = pd.to_numeric(df_actualizar["id"], errors="coerce").fillna(0).astype(int)
+    # Buscar ID en Belove normalizando SKU con/sin guión
+    def buscar_id_belove(sku):
+        sku = str(sku).strip()
+        match = df_belove[df_belove["sku"] == sku]
+        if len(match) > 0:
+            return int(match.iloc[0]["id"])
+        sku_norm = sku.replace("-", "").upper()
+        match = df_belove[df_belove["sku"].str.replace("-", "").str.upper() == sku_norm]
+        if len(match) > 0:
+            return int(match.iloc[0]["id"])
+        return 0
 
+    df_actualizar["id"] = df_actualizar["sku"].apply(buscar_id_belove)
+
+    # Calcular precios
     def calcular_precio(row):
         precio_descuento = int(row["precio_descuento"]) if row["precio_descuento"] else 0
         if row["producto_nuevo"] == "NUEVO":
@@ -319,16 +323,9 @@ def procesar_cruce(df_eroshop, sheet):
     df_actualizar["precio_descuento_final"] = df_actualizar["precio_descuento"].apply(lambda x: int(x) if x else 0)
     df_actualizar["stock_final"] = df_actualizar["stock_eroshop"].apply(lambda x: int(x) if x else 0)
 
-    print(f"DEBUG df_actualizar dtypes:\n{df_actualizar.dtypes}")
-    for col in ["precio_final", "precio_descuento_final", "stock_final"]:
-        vals = df_actualizar[col].tolist()
-        problemas = [v for v in vals if str(v) in ["nan", "inf", "-inf"] or (isinstance(v, float) and (v != v or abs(v) == float('inf')))]
-        if problemas:
-            print(f"DEBUG {col} tiene {len(problemas)} valores problemáticos: {problemas[:5]}")
-   
     df_exportar = df_actualizar[["id", "sku", "precio_final", "precio_descuento_final", "stock_final"]].copy()
     df_exportar.columns = ["id", "sku", "precio", "precio_descuento", "stock"]
-    df_exportar = df_exportar.fillna("")
+    df_exportar = df_exportar.fillna(0)
 
     resumen = {
         "total_productos": len(df_resultado),
@@ -338,26 +335,19 @@ def procesar_cruce(df_eroshop, sheet):
         "a_actualizar": len(df_exportar),
     }
 
-    print(f"DEBUG df_exportar dtypes:\n{df_exportar.dtypes}")
     print(f"DEBUG df_exportar sample:\n{df_exportar.head(3).to_string()}")
-    for col in df_exportar.columns:
-        problemas = df_exportar[col].apply(lambda x: not isinstance(x, (int, str, type(None))) and (x != x or x == float('inf') or x == float('-inf'))).sum()
-        if problemas > 0:
-            print(f"DEBUG columna problemática: {col} — {problemas} valores")
     return df_exportar, resumen
 
 # ── ACTUALIZAR GIST ───────────────────────────────────────────
 def actualizar_gist(df_exportar):
     df_exportar = df_exportar.copy()
-    df_exportar = df_exportar.replace([float('inf'), float('-inf')], None)
-    df_exportar = df_exportar.where(pd.notnull(df_exportar), None)
+    df_exportar = df_exportar.replace([float('inf'), float('-inf')], 0)
+    df_exportar = df_exportar.fillna(0)
     exportar_json = df_exportar.to_dict(orient="records")
     for item in exportar_json:
         for k, v in item.items():
-            if v != v:  # detecta NaN
-                item[k] = None
-            elif str(v) in ["nan", "inf", "-inf", ""]:
-                item[k] = None
+            if isinstance(v, float) and (v != v or v == float('inf') or v == float('-inf')):
+                item[k] = 0
 
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
@@ -401,6 +391,7 @@ async def main():
         print(f"   Cambio stock:     {resumen['cambio_stock']}")
         print(f"   Productos nuevos: {resumen['productos_nuevos']}")
         print(f"   A actualizar:     {resumen['a_actualizar']}")
+
         enviar_slack(
             f"✅ *Automatización Belove completada*\n"
             f"📦 Total productos: {resumen['total_productos']}\n"
