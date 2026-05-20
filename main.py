@@ -422,6 +422,67 @@ def procesar_cruce(df_eroshop, sheet):
     }
 
     print(f"DEBUG df_exportar sample:\n{df_exportar.head(3).to_string()}")
+# ── DETECTAR PRODUCTOS NUEVOS CON STOCK ──────────────────
+    nuevos_con_stock = df_resultado[
+        (df_resultado["producto_nuevo"] == "NUEVO") &
+        (df_resultado["stock_eroshop"] > 0)
+    ][["sku", "nombre", "stock_eroshop", "precio_calculado"]].copy()
+
+    if len(nuevos_con_stock) > 0:
+        lista = "\n".join([
+            f"• {row['nombre'][:30]} | SKU: {row['sku']} | Stock: {int(row['stock_eroshop'])} | Precio: ${int(row['precio_calculado']):,}"
+            for _, row in nuevos_con_stock.iterrows()
+        ])
+        enviar_slack(
+            f"🆕 *{len(nuevos_con_stock)} productos nuevos en Eroshop con stock:*\n{lista}"
+        )
+
+    # ── DETECTAR PRODUCTOS QUE DESAPARECIERON DE EROSHOP ─────
+    skus_eroshop = set(df_eroshop["sku"].tolist())
+    productos_desaparecidos = df_belove[
+        (~df_belove["sku"].isin(skus_eroshop)) &
+        (df_belove["stock"] > 0)
+    ][["id", "sku", "nombre", "stock"]].copy()
+
+    if len(productos_desaparecidos) > 0:
+        # Agregar al exportar con stock 0
+        for _, row in productos_desaparecidos.iterrows():
+            df_exportar = pd.concat([df_exportar, pd.DataFrame([{
+                "id": int(row["id"]),
+                "sku": row["sku"],
+                "precio": 0,
+                "precio_descuento": 0,
+                "stock": 0
+            }])], ignore_index=True)
+
+        lista = "\n".join([
+            f"• {row['nombre'][:30]} | SKU: {row['sku']} | Stock anterior: {int(row['stock'])}"
+            for _, row in productos_desaparecidos.iterrows()
+        ])
+        enviar_slack(
+            f"⚠️ *{len(productos_desaparecidos)} productos desaparecieron de Eroshop → stock puesto en 0:*\n{lista}"
+        )
+
+    # ── HISTORIAL EN GOOGLE SHEETS ────────────────────────────
+    try:
+        ws_historial = sheet.worksheet("historial")
+    except:
+        ws_historial = sheet.add_worksheet(title="historial", rows=1000, cols=10)
+        ws_historial.update(range_name="A1", values=[["fecha", "total_productos", "cambio_precio", "cambio_stock", "productos_nuevos", "desaparecidos", "a_actualizar"]])
+
+    from datetime import datetime
+    fila_historial = [[
+        datetime.now().strftime("%Y-%m-%d %H:%M"),
+        resumen["total_productos"],
+        resumen["cambio_precio"],
+        resumen["cambio_stock"],
+        resumen["productos_nuevos"],
+        len(productos_desaparecidos),
+        resumen["a_actualizar"],
+    ]]
+    ws_historial.append_rows(fila_historial)
+    print("✅ Historial actualizado")
+    
     return df_exportar, resumen
 
 # ── ACTUALIZAR GIST ───────────────────────────────────────────
