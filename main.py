@@ -319,7 +319,7 @@ def procesar_cruce(df_eroshop, sheet):
             row.get("stock_eroshop", ""), row.get("stock_belove", ""),
             f'=IF(E{i}<>G{i};"SÍ";"NO")',
             f'=IF(H{i}<>I{i};"SÍ";"NO")',
-            f'=IF(ISERROR(VLOOKUP(A{i};belove_raw!A:A;1;0));"NUEVO";"EXISTE")',
+            f'=IF(ISERROR(VLOOKUP(TEXT(A{i};"0");TEXT(belove_raw!A:A;"0");1;0));"NUEVO";"EXISTE")',
             f"=E{i}-D{i}",
             f"=ROUND(M{i}/E{i}*100;1)",
             f"=E{i}-D{i}-VLOOKUP(\"bolsa\";config!A:B;2;0)-ROUND(E{i}*VLOOKUP(\"comision\";config!A:B;2;0);0)-IF(E{i}>=VLOOKUP(\"despacho_gratis_desde\";config!A:B;2;0);VLOOKUP(\"costo_despacho\";config!A:B;2;0);0)",
