@@ -78,32 +78,6 @@ async def extraer_producto(page, url):
     if el:
         nombre = (await el.inner_text()).strip()
 
-    sku = ""
-    el = await page.query_selector(".sku_elem")
-    if el:
-        sku = (await el.inner_text()).strip()
-
-    stock = ""
-    el = await page.query_selector("#stock")
-    if el:
-        texto = (await el.inner_text()).strip()
-        stock = texto.replace("DISPONIBILIDAD:", "").replace("Disponibilidad:", "").strip()
-        if stock == "":
-            stock = "0"
-
-    precio = ""
-    for selector in [".product-form_price", ".product-price", ".price", "[class*='price']", ".unit-price"]:
-        el = await page.query_selector(selector)
-        if el:
-            texto = (await el.inner_text()).strip()
-            if texto:
-                precio = texto.replace("$", "").replace(".", "").replace(" + IVA", "").replace("+IVA", "").strip()
-                try:
-                    precio = str(int(precio))
-                except:
-                    precio = texto
-                break
-
     img = ""
     for selector in [".product-image img", "figure img", ".main-image img"]:
         el = await page.query_selector(selector)
@@ -112,7 +86,88 @@ async def extraer_producto(page, url):
             if img:
                 break
 
-    return {"nombre": nombre, "sku": sku, "stock": stock, "precio_neto": precio, "url": url, "imagen": img}
+    # Verificar si tiene variantes
+    selects = await page.query_selector_all("select.prod-options-selects")
+
+    if not selects:
+        # Producto simple sin variantes
+        sku = ""
+        el = await page.query_selector(".sku_elem")
+        if el:
+            sku = (await el.inner_text()).strip()
+
+        stock = ""
+        el = await page.query_selector("#stock")
+        if el:
+            texto = (await el.inner_text()).strip()
+            stock = texto.replace("DISPONIBILIDAD:", "").replace("Disponibilidad:", "").strip()
+            if stock == "":
+                stock = "0"
+
+        precio = ""
+        for selector in [".product-form_price", ".product-price", ".price", "[class*='price']", ".unit-price"]:
+            el = await page.query_selector(selector)
+            if el:
+                texto = (await el.inner_text()).strip()
+                if texto:
+                    precio = texto.replace("$", "").replace(".", "").replace(" + IVA", "").replace("+IVA", "").strip()
+                    try:
+                        precio = str(int(precio))
+                    except:
+                        precio = texto
+                    break
+
+        return [{"nombre": nombre, "sku": sku, "stock": stock, "precio_neto": precio, "url": url, "imagen": img}]
+
+    else:
+        # Producto con variantes — iterar cada opción del primer select
+        variantes = []
+        opciones = await selects[0].query_selector_all("option")
+
+        for opcion in opciones:
+            value = await opcion.get_attribute("value")
+            if not value:
+                continue
+
+            # Seleccionar la opción
+            await selects[0].select_option(value=value)
+            await page.wait_for_timeout(1000)
+
+            # Capturar SKU
+            sku = ""
+            el = await page.query_selector(".sku_elem")
+            if el:
+                sku = (await el.inner_text()).strip()
+
+            # Capturar stock desde data-variant-stock
+            stock_attr = await opcion.get_attribute("data-variant-stock")
+            stock = stock_attr if stock_attr else "0"
+
+            # Capturar precio
+            precio = ""
+            for selector in [".product-form_price", ".product-price", ".price", "[class*='price']", ".unit-price"]:
+                el = await page.query_selector(selector)
+                if el:
+                    texto = (await el.inner_text()).strip()
+                    if texto:
+                        precio = texto.replace("$", "").replace(".", "").replace(" + IVA", "").replace("+IVA", "").strip()
+                        try:
+                            precio = str(int(precio))
+                        except:
+                            precio = texto
+                        break
+
+            if sku:
+                variantes.append({
+                    "nombre": nombre,
+                    "sku": sku,
+                    "stock": stock,
+                    "precio_neto": precio,
+                    "url": url,
+                    "imagen": img
+                })
+
+        return variantes if variantes else [{"nombre": nombre, "sku": "", "stock": "0", "precio_neto": "", "url": url, "imagen": img}]
 
 async def scraping_eroshop():
     async with async_playwright() as pw:
@@ -162,8 +217,8 @@ async def scraping_eroshop():
             intentos = 0
             while intentos < 3:
                 try:
-                    dato = await extraer_producto(page, url)
-                    productos.append(dato)
+                    datos = await extraer_producto(page, url)
+                    productos.extend(datos)
                     if i % 50 == 0:
                         print(f"  [{i}/{len(product_urls)}] {dato['nombre'][:35]}")
                     break
