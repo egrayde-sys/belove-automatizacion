@@ -5,6 +5,7 @@ import random
 import time
 import requests
 import pandas as pd
+from datetime import datetime
 from playwright.async_api import async_playwright
 from google.oauth2.service_account import Credentials
 import gspread
@@ -120,7 +121,7 @@ async def extraer_producto(page, url):
         return [{"nombre": nombre, "sku": sku, "stock": stock, "precio_neto": precio, "url": url, "imagen": img}]
 
     else:
-        # Producto con variantes — iterar cada opción del primer select
+        # Producto con variantes
         variantes = []
         opciones = await selects[0].query_selector_all("option")
 
@@ -129,21 +130,17 @@ async def extraer_producto(page, url):
             if not value:
                 continue
 
-            # Seleccionar la opción
             await selects[0].select_option(value=value)
             await page.wait_for_timeout(1000)
 
-            # Capturar SKU
             sku = ""
             el = await page.query_selector(".sku_elem")
             if el:
                 sku = (await el.inner_text()).strip()
 
-            # Capturar stock desde data-variant-stock
             stock_attr = await opcion.get_attribute("data-variant-stock")
             stock = stock_attr if stock_attr else "0"
 
-            # Capturar precio
             precio = ""
             for selector in [".product-form_price", ".product-price", ".price", "[class*='price']", ".unit-price"]:
                 el = await page.query_selector(selector)
@@ -220,7 +217,7 @@ async def scraping_eroshop():
                     datos = await extraer_producto(page, url)
                     productos.extend(datos)
                     if i % 50 == 0:
-                        print(f"  [{i}/{len(product_urls)}] {dato['nombre'][:35]}")
+                        print(f"  [{i}/{len(product_urls)}] {datos[0]['nombre'][:35]}")
                     break
                 except Exception as e:
                     if "closed" in str(e).lower() or "target" in str(e).lower():
@@ -247,12 +244,9 @@ async def scraping_eroshop():
         print(f"DEBUG df scraping sample: {df[['sku','stock','precio_neto']].head(3).to_string()}")
 
         total = len(df)
-        sin_sku = df[df["sku"] == ""].shape[0]
-        sin_precio = df[df["precio_neto"] == 0].shape[0]
         alertas = []
         if total > 0:
-            if sin_sku / total > UMBRAL_CALIDAD:
-                alertas.append(f"🚨 {sin_sku} productos sin SKU ({sin_sku/total:.0%})")
+            sin_precio = df[df["precio_neto"] == 0].shape[0]
             if sin_precio / total > UMBRAL_CALIDAD:
                 alertas.append(f"🚨 {sin_precio} productos sin precio ({sin_precio/total:.0%})")
 
@@ -386,27 +380,33 @@ def procesar_cruce(df_eroshop, sheet):
 
     df_todos["id"] = df_todos["sku"].apply(buscar_id_belove)
 
-# Crear lookup de precios fijos China
+    # Crear lookup de precios fijos China
     precios_fijos = {}
     if "precio_descuento_fijo" in df_costos.columns:
         for _, r in df_costos.iterrows():
             if r.get("precio_descuento_fijo") and int(r["precio_descuento_fijo"]) > 0:
                 precios_fijos[str(r["sku"]).strip()] = int(r["precio_descuento_fijo"])
 
-    # Calcular precios
-    def calcular_precio(row):
+    # Calcular precio_descuento
+    def calcular_precio_descuento(row):
         sku = str(row["sku"]).strip()
-        # Precio fijo China tiene prioridad
         if sku in precios_fijos:
             return precios_fijos[sku]
-        precio_descuento = int(row["precio_descuento"]) if row["precio_descuento"] else 0
-        if row["producto_nuevo"] == "NUEVO":
-            pct = random.uniform(0.15, 0.69)
-            return int((precio_descuento * (1 + pct) // 1000) * 1000 + 990)
-        return int(row["precio_actual_belove"]) if row["precio_actual_belove"] else precio_descuento
+        return int(row["precio_descuento"]) if row["precio_descuento"] else 0
 
+    # Calcular precio (siempre mayor que precio_descuento)
+    def calcular_precio(row):
+        precio_desc = row["precio_descuento_final"]
+        if precio_desc == 0:
+            return 0
+        precio_actual_belove = int(row["precio_actual_belove"]) if row["precio_actual_belove"] else 0
+        if row["producto_nuevo"] != "NUEVO" and precio_actual_belove > 0:
+            return precio_actual_belove
+        pct = random.uniform(0.15, 0.69)
+        return int((precio_desc * (1 + pct) // 1000) * 1000 + 990)
+
+    df_todos["precio_descuento_final"] = df_todos.apply(calcular_precio_descuento, axis=1)
     df_todos["precio_final"] = df_todos.apply(calcular_precio, axis=1)
-    df_todos["precio_descuento_final"] = df_todos["precio_descuento"].apply(lambda x: int(x) if x else 0)
     df_todos["stock_final"] = df_todos["stock_eroshop"].apply(lambda x: int(x) if x else 0)
 
     df_exportar = df_todos[["id", "sku", "precio_final", "precio_descuento_final", "stock_final"]].copy()
@@ -422,7 +422,8 @@ def procesar_cruce(df_eroshop, sheet):
     }
 
     print(f"DEBUG df_exportar sample:\n{df_exportar.head(3).to_string()}")
-# ── DETECTAR PRODUCTOS NUEVOS CON STOCK ──────────────────
+
+    # ── DETECTAR PRODUCTOS NUEVOS CON STOCK ──────────────────
     nuevos_con_stock = df_resultado[
         (df_resultado["producto_nuevo"] == "NUEVO") &
         (df_resultado["stock_eroshop"] > 0)
@@ -433,19 +434,16 @@ def procesar_cruce(df_eroshop, sheet):
             f"• {row['nombre'][:30]} | SKU: {row['sku']} | Stock: {int(row['stock_eroshop'])} | Precio: ${int(row['precio_calculado']):,}"
             for _, row in nuevos_con_stock.iterrows()
         ])
-        enviar_slack(
-            f"🆕 *{len(nuevos_con_stock)} productos nuevos en Eroshop con stock:*\n{lista}"
-        )
+        enviar_slack(f"🆕 *{len(nuevos_con_stock)} productos nuevos en Eroshop con stock:*\n{lista}")
 
     # ── DETECTAR PRODUCTOS QUE DESAPARECIERON DE EROSHOP ─────
-    skus_eroshop = set(df_eroshop["sku"].tolist())
+    skus_eroshop_set = set(df_eroshop["sku"].tolist())
     productos_desaparecidos = df_belove[
-        (~df_belove["sku"].isin(skus_eroshop)) &
+        (~df_belove["sku"].isin(skus_eroshop_set)) &
         (df_belove["stock"] > 0)
     ][["id", "sku", "nombre", "stock"]].copy()
 
     if len(productos_desaparecidos) > 0:
-        # Agregar al exportar con stock 0
         for _, row in productos_desaparecidos.iterrows():
             df_exportar = pd.concat([df_exportar, pd.DataFrame([{
                 "id": int(row["id"]),
@@ -459,9 +457,7 @@ def procesar_cruce(df_eroshop, sheet):
             f"• {row['nombre'][:30]} | SKU: {row['sku']} | Stock anterior: {int(row['stock'])}"
             for _, row in productos_desaparecidos.iterrows()
         ])
-        enviar_slack(
-            f"⚠️ *{len(productos_desaparecidos)} productos desaparecieron de Eroshop → stock puesto en 0:*\n{lista}"
-        )
+        enviar_slack(f"⚠️ *{len(productos_desaparecidos)} productos desaparecieron de Eroshop → stock 0:*\n{lista}")
 
     # ── HISTORIAL EN GOOGLE SHEETS ────────────────────────────
     try:
@@ -470,8 +466,7 @@ def procesar_cruce(df_eroshop, sheet):
         ws_historial = sheet.add_worksheet(title="historial", rows=1000, cols=10)
         ws_historial.update(range_name="A1", values=[["fecha", "total_productos", "cambio_precio", "cambio_stock", "productos_nuevos", "desaparecidos", "a_actualizar"]])
 
-    from datetime import datetime
-    fila_historial = [[
+    ws_historial.append_rows([[
         datetime.now().strftime("%Y-%m-%d %H:%M"),
         resumen["total_productos"],
         resumen["cambio_precio"],
@@ -479,10 +474,9 @@ def procesar_cruce(df_eroshop, sheet):
         resumen["productos_nuevos"],
         len(productos_desaparecidos),
         resumen["a_actualizar"],
-    ]]
-    ws_historial.append_rows(fila_historial)
+    ]])
     print("✅ Historial actualizado")
-    
+
     return df_exportar, resumen
 
 # ── ACTUALIZAR GIST ───────────────────────────────────────────
@@ -559,13 +553,13 @@ if __name__ == "__main__":
     while True:
         result = asyncio.run(main())
         print(f"Resultado: {result}")
-        
-        # Calcular tiempo hasta las 8am del día siguiente
-        ahora = __import__("datetime").datetime.now()
+
+        ahora = datetime.now()
         manana_8am = ahora.replace(hour=8, minute=0, second=0, microsecond=0)
         if ahora.hour >= 8:
-            manana_8am = manana_8am + __import__("datetime").timedelta(days=1)
-        
+            import datetime as dt
+            manana_8am = manana_8am + dt.timedelta(days=1)
+
         segundos = (manana_8am - ahora).total_seconds()
         horas = segundos / 3600
         print(f"⏰ Próxima ejecución: {manana_8am.strftime('%Y-%m-%d 08:00')} (en {horas:.1f} horas)")
