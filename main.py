@@ -386,8 +386,19 @@ def procesar_cruce(df_eroshop, sheet):
 
     df_todos["id"] = df_todos["sku"].apply(buscar_id_belove)
 
+# Crear lookup de precios fijos China
+    precios_fijos = {}
+    if "precio_descuento_fijo" in df_costos.columns:
+        for _, r in df_costos.iterrows():
+            if r.get("precio_descuento_fijo") and int(r["precio_descuento_fijo"]) > 0:
+                precios_fijos[str(r["sku"]).strip()] = int(r["precio_descuento_fijo"])
+
     # Calcular precios
     def calcular_precio(row):
+        sku = str(row["sku"]).strip()
+        # Precio fijo China tiene prioridad
+        if sku in precios_fijos:
+            return precios_fijos[sku]
         precio_descuento = int(row["precio_descuento"]) if row["precio_descuento"] else 0
         if row["producto_nuevo"] == "NUEVO":
             pct = random.uniform(0.15, 0.69)
