@@ -495,8 +495,17 @@ async def main():
         return {"status": "error", "mensaje": str(e)}
 
 if __name__ == "__main__":
-    result = asyncio.run(main())
-    print(f"Resultado: {result}")
-    print("Script terminado, esperando próxima ejecución...")
     while True:
-        time.sleep(3600)
+        result = asyncio.run(main())
+        print(f"Resultado: {result}")
+        
+        # Calcular tiempo hasta las 8am del día siguiente
+        ahora = __import__("datetime").datetime.now()
+        manana_8am = ahora.replace(hour=8, minute=0, second=0, microsecond=0)
+        if ahora.hour >= 8:
+            manana_8am = manana_8am + __import__("datetime").timedelta(days=1)
+        
+        segundos = (manana_8am - ahora).total_seconds()
+        horas = segundos / 3600
+        print(f"⏰ Próxima ejecución: {manana_8am.strftime('%Y-%m-%d 08:00')} (en {horas:.1f} horas)")
+        time.sleep(segundos)
