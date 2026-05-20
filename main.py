@@ -424,9 +424,14 @@ def procesar_cruce(df_eroshop, sheet):
     print(f"DEBUG df_exportar sample:\n{df_exportar.head(3).to_string()}")
 
     # ── DETECTAR PRODUCTOS NUEVOS CON STOCK ──────────────────
+    # Comparar directamente contra df_belove en Python (más confiable que la fórmula de Sheets)
+    skus_belove = set(df_belove["sku"].astype(str).str.strip().tolist())
+    
     nuevos_con_stock = df_resultado[
-        (df_resultado["producto_nuevo"] == "NUEVO") &
         (df_resultado["stock_eroshop"] > 0)
+    ].copy()
+    nuevos_con_stock = nuevos_con_stock[
+        ~nuevos_con_stock["sku"].astype(str).str.strip().isin(skus_belove)
     ][["sku", "nombre", "stock_eroshop", "precio_calculado"]].copy()
 
     if len(nuevos_con_stock) > 0:
