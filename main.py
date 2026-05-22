@@ -572,12 +572,12 @@ if __name__ == "__main__":
         print(f"Resultado: {result}")
 
         ahora = datetime.now()
-        manana_8am = ahora.replace(hour=8, minute=0, second=0, microsecond=0)
+        manana_8am = ahora.replace(hour=9, minute=0, second=0, microsecond=0)
         if ahora.hour >= 8:
             import datetime as dt
             manana_8am = manana_8am + dt.timedelta(days=1)
 
         segundos = (manana_8am - ahora).total_seconds()
         horas = segundos / 3600
-        print(f"⏰ Próxima ejecución: {manana_8am.strftime('%Y-%m-%d 08:00')} (en {horas:.1f} horas)")
+        print(f"⏰ Próxima ejecución: {manana_8am.strftime('%Y-%m-%d')} 05:00 Chile (en {horas:.1f} horas)")
         time.sleep(segundos)
