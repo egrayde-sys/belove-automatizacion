@@ -17,7 +17,7 @@ SLACK_CHANNEL  = os.environ.get("SLACK_CHANNEL", "#belove")
 EMAIL          = os.environ.get("EROSHOP_EMAIL")
 PASSWORD       = os.environ.get("EROSHOP_PASSWORD")
 BASE_URL       = "https://www.eroshopmayorista.cl"
-DELAY          = 1000
+DELAY          = 750
 UMBRAL_CALIDAD = 0.10
 GITHUB_TOKEN   = os.environ.get("GITHUB_TOKEN")
 GIST_ID        = "c6a5fca73c46f6a98bef5f47dc8ff123"
@@ -425,13 +425,15 @@ def procesar_cruce(df_eroshop, sheet):
 
     # ── DETECTAR PRODUCTOS NUEVOS CON STOCK ──────────────────
     # Comparar directamente contra df_belove en Python (más confiable que la fórmula de Sheets)
-    skus_belove = set(df_belove["sku"].astype(str).str.strip().tolist())
-    
+    skus_belove_norm = set(
+        df_belove["sku"].astype(str).str.replace("-","").str.upper().str.lstrip("0").tolist()
+    )
+
     nuevos_con_stock = df_resultado[
         (df_resultado["stock_eroshop"] > 0)
     ].copy()
     nuevos_con_stock = nuevos_con_stock[
-        ~nuevos_con_stock["sku"].astype(str).str.strip().isin(skus_belove)
+        ~nuevos_con_stock["sku"].astype(str).str.replace("-","").str.upper().str.lstrip("0").isin(skus_belove_norm)
     ][["sku", "nombre", "stock_eroshop", "precio_calculado"]].copy()
 
     if len(nuevos_con_stock) > 0:
@@ -442,11 +444,21 @@ def procesar_cruce(df_eroshop, sheet):
         enviar_slack(f"🆕 *{len(nuevos_con_stock)} productos nuevos en Eroshop con stock:*\n{lista}")
 
     # ── DETECTAR PRODUCTOS QUE DESAPARECIERON DE EROSHOP ─────
-    skus_eroshop_set = set(df_eroshop["sku"].tolist())
+    # Normalizar SKUs de Eroshop para comparar con/sin guión
+    skus_eroshop_norm = set(
+        df_eroshop["sku"].astype(str).str.replace("-","").str.upper().str.lstrip("0").tolist()
+    )
+
     productos_desaparecidos = df_belove[
-        (~df_belove["sku"].isin(skus_eroshop_set)) &
+        (~df_belove["sku"].astype(str).str.replace("-","").str.upper().str.lstrip("0").isin(skus_eroshop_norm)) &
         (df_belove["stock"] > 0)
     ][["id", "sku", "nombre", "stock"]].copy()
+
+    # Excluir SKUs que están en costos_especiales (productos China que no están en Eroshop)
+    skus_china = set(df_costos["sku"].astype(str).str.strip().tolist())
+    productos_desaparecidos = productos_desaparecidos[
+        ~productos_desaparecidos["sku"].astype(str).str.strip().isin(skus_china)
+    ]
 
     if len(productos_desaparecidos) > 0:
         for _, row in productos_desaparecidos.iterrows():
