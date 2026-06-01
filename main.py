@@ -54,7 +54,7 @@ def conectar_sheets():
     print(f"DEBUG SHEET_NAME: '{SHEET_NAME}'")
     sheets_disponibles = [s.title for s in client.openall()]
     print(f"DEBUG Sheets disponibles: {sheets_disponibles}")
-    return client.open(SHEET_NAME)
+    return client, client.open(SHEET_NAME)
 
 # ── SCRAPING ──────────────────────────────────────────────────
 async def crear_sesion(playwright):
@@ -526,14 +526,153 @@ def actualizar_gist(df_exportar):
     else:
         raise Exception(f"Error Gist: {resp.status_code} — {resp.text[:200]}")
 
+# ── ACTUALIZAR VENTAS NUEVAS ──────────────────────────────────
+def actualizar_ventas(sheet_resultados, sheet_eroshop):
+    import xml.etree.ElementTree as ET
+
+    # Leer pedidos existentes
+    ws_ventas = sheet_resultados.worksheet("ventas")
+    df_ventas_actual = pd.DataFrame(ws_ventas.get_all_records())
+    pedidos_existentes = set(df_ventas_actual["pedido_ID"].astype(str).tolist())
+    print(f"📋 Pedidos en Sheets: {len(pedidos_existentes)}")
+
+    # Descargar XML
+    resp = requests.get("https://belove.cl/moldeable/exportarEliasXML.php")
+    root = ET.fromstring(resp.content)
+    print(f"📋 Pedidos en XML: {len(root.findall('pedido'))}")
+
+    # Leer configuración
+    ws_config = sheet_resultados.worksheet("costos_config")
+    df_config = pd.DataFrame(ws_config.get_all_records())
+    config = {r["parametro"]: float(str(r["valor"]).replace(",", ".")) for _, r in df_config.iterrows()}
+
+    ws_comunas = sheet_resultados.worksheet("despacho_comunas")
+    df_comunas = pd.DataFrame(ws_comunas.get_all_records())
+    df_comunas["costo_despacho"] = pd.to_numeric(df_comunas["costo_despacho"], errors="coerce").fillna(4600)
+    costo_despacho_comuna = dict(zip(
+        df_comunas["comuna"].str.strip().str.upper(),
+        df_comunas["costo_despacho"]
+    ))
+
+    ws_eroshop_raw = sheet_eroshop.worksheet("eroshop_raw")
+    df_eroshop_raw = pd.DataFrame(ws_eroshop_raw.get_all_records())
+    df_eroshop_raw["sku"] = df_eroshop_raw["sku"].astype(str).str.strip()
+    df_eroshop_raw["precio_neto"] = pd.to_numeric(df_eroshop_raw["precio_neto"], errors="coerce").fillna(0)
+    costos_eroshop = dict(zip(df_eroshop_raw["sku"], df_eroshop_raw["precio_neto"]))
+
+    df_belove = pd.DataFrame(requests.get(URL_BELOVE).json())
+    df_belove["sku"] = df_belove["sku"].astype(str).str.strip()
+    nombres_belove = dict(zip(df_belove["sku"], df_belove["nombre"]))
+
+    ESTADOS_VALIDOS  = {"Pagado", "acreditado"}
+    BOLSA_DENTRO     = config.get("bolsa_dentro", 160)
+    BOLSA_FUERA      = config.get("bolsa_fuera", 70)
+    STICKER_LARGO    = config.get("sticker_largo", 140)
+    STICKER_CIRC     = config.get("sticker_circulo", 51)
+    raw_comision     = config.get("comision_pago", 300)
+    COMISION         = raw_comision / 100000
+    DESPACHO_DESDE   = config.get("despacho_gratis_desde", 40000)
+    REGALO_DESDE     = config.get("regalo_desde", 120000)
+
+    seen_items = set()
+    nuevas_ventas = []
+    nuevos_items = []
+
+    for pedido in root.findall("pedido"):
+        estado = pedido.findtext("Estado", "")
+        if estado not in ESTADOS_VALIDOS:
+            continue
+        pedido_id = pedido.findtext("ID", "")
+        if pedido_id in pedidos_existentes:
+            continue
+
+        total        = float(pedido.findtext("Total_pagado", 0) or 0)
+        despacho_val = float(pedido.findtext("Valor_despacho", 0) or 0)
+        region       = pedido.findtext("Region", "")
+        comuna       = pedido.findtext("Comuna", "")
+        fecha        = pedido.findtext("Fecha", "")
+        medio_pago   = pedido.findtext("Medio_de_pago", "")
+        descuento    = float(pedido.findtext("Descuento", 0) or 0)
+        oc           = pedido.findtext("OC", "")
+
+        costo_despacho_real = costo_despacho_comuna.get(comuna.strip().upper(), 4600)
+        despacho_costo = costo_despacho_real if total > DESPACHO_DESDE else 0
+        regalo         = 1 if total > REGALO_DESDE else 0
+        costo_bolsas   = BOLSA_DENTRO + BOLSA_FUERA
+        costo_stickers = STICKER_LARGO + STICKER_CIRC
+        costo_comision = round(total * COMISION)
+
+        costo_eroshop_pedido = 0
+        productos_pedido = []
+        seen_en_pedido = set()
+
+        for prod in pedido.findall(".//producto"):
+            item_id = prod.findtext("ID", "")
+            clave = (pedido_id, item_id)
+            if clave in seen_items:
+                continue
+            seen_items.add(clave)
+            if item_id in seen_en_pedido:
+                continue
+            seen_en_pedido.add(item_id)
+
+            sku            = prod.findtext("Codigo", "").strip()
+            nombre         = nombres_belove.get(sku, prod.findtext("Nombre", ""))
+            cantidad       = float(prod.findtext("Cantidad", 1) or 1)
+            precio_unit    = float(prod.findtext("Precio_unitario", 0) or 0)
+            precio_total_p = float(prod.findtext("Precio_total", 0) or 0)
+            costo_unit     = costos_eroshop.get(sku, round(precio_unit * 0.5))
+            costo_eroshop_pedido += costo_unit * cantidad
+
+            productos_pedido.append({
+                "pedido_ID": pedido_id, "fecha": fecha, "sku": sku,
+                "nombre_producto": nombre, "cantidad": int(cantidad),
+                "precio_unitario": int(precio_unit), "precio_total": int(precio_total_p),
+                "costo_producto": int(costo_unit), "costo_confiable": 1
+            })
+
+        nuevos_items.extend(productos_pedido)
+        costo_total  = costo_eroshop_pedido + despacho_costo + costo_bolsas + costo_stickers + costo_comision
+        rentabilidad = total - costo_total
+        pct_rent     = round(rentabilidad / total * 100, 1) if total > 0 else 0
+
+        nuevas_ventas.append({
+            "pedido_ID": pedido_id, "OC": oc, "fecha": fecha, "estado": estado,
+            "medio_pago": medio_pago, "region": region, "comuna": comuna,
+            "total": int(total), "valor_despacho": int(despacho_val),
+            "descuento": int(descuento), "cantidad_productos": len(productos_pedido),
+            "regalo": regalo, "costo_eroshop": int(costo_eroshop_pedido),
+            "despacho_costo": int(despacho_costo), "costo_bolsas": int(costo_bolsas),
+            "costo_stickers": int(costo_stickers), "costo_comision": int(costo_comision),
+            "costo_total": int(costo_total), "rentabilidad": int(rentabilidad),
+            "pct_rentabilidad": pct_rent, "costo_confiable": 1
+        })
+
+    print(f"📊 Ventas nuevas: {len(nuevas_ventas)} | Items nuevos: {len(nuevos_items)}")
+
+    if nuevas_ventas:
+        ws_ventas.append_rows(pd.DataFrame(nuevas_ventas).values.tolist())
+        sheet_resultados.worksheet("items").append_rows(pd.DataFrame(nuevos_items).values.tolist())
+        print(f"✅ {len(nuevas_ventas)} ventas y {len(nuevos_items)} items agregados")
+        return len(nuevas_ventas)
+    else:
+        print("✅ Ventas al día")
+        return 0
+
 # ── MAIN ──────────────────────────────────────────────────────
 async def main():
     print("🚀 Iniciando automatización Belove...")
     alertas = []
 
     try:
-        sheet = conectar_sheets()
+        client, sheet = conectar_sheets()
         print("✅ Conectado a Google Sheets")
+        # Conectar sheet de resultados
+        SHEET_RESULTADOS = "1Hm3O2bh1iZvJLdSfqoHTj5U82EBMCRcvQ0dsy3LtLNk"
+        sheet_resultados = client.open_by_key(SHEET_RESULTADOS)
+        ventas_nuevas = actualizar_ventas(sheet_resultados, sheet)
+        if ventas_nuevas > 0:
+            enviar_slack(f"💰 *{ventas_nuevas} ventas nuevas registradas en Belove Resultados*")
 
         df_eroshop, alertas_scraping = await scraping_eroshop()
         alertas.extend(alertas_scraping)
