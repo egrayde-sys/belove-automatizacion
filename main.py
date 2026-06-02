@@ -659,6 +659,205 @@ def actualizar_ventas(sheet_resultados, sheet_eroshop):
         print("✅ Ventas al día")
         return 0
 
+# ── ACTUALIZAR RESUMEN MES ACTUAL ─────────────────────────────
+def actualizar_resumen_mes_actual(sheet_resultados):
+    from datetime import datetime
+    import math
+
+    ahora = datetime.now()
+    año_actual = ahora.year
+    mes_actual = ahora.month
+    MESES_N = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+    periodo_actual = f"{MESES_N[mes_actual-1]} {año_actual}"
+
+    print(f"📅 Calculando resumen para: {periodo_actual}")
+
+    # Leer ventas
+    ws_ventas = sheet_resultados.worksheet("ventas")
+    df_v = pd.DataFrame(ws_ventas.get_all_records())
+    if df_v.empty:
+        print("⚠️ Sin ventas"); return
+
+    df_v["fecha"] = pd.to_datetime(df_v["fecha"], errors="coerce")
+    df_v["total"] = pd.to_numeric(df_v["total"], errors="coerce").fillna(0)
+    df_v["cantidad_productos"] = pd.to_numeric(df_v["cantidad_productos"], errors="coerce").fillna(1)
+
+    estados_validos = {"Pagado", "acreditado"}
+    df_mes = df_v[
+        (df_v["fecha"].dt.year == año_actual) &
+        (df_v["fecha"].dt.month == mes_actual) &
+        (df_v["estado"].isin(estados_validos))
+    ].copy()
+
+    if df_mes.empty:
+        print(f"⚠️ Sin ventas para {periodo_actual}"); return
+
+    # Leer configuración costos fijos
+    ws_config = sheet_resultados.worksheet("costos_config")
+    df_config = pd.DataFrame(ws_config.get_all_records())
+    config = {r["parametro"]: float(str(r["valor"]).replace(",",".")) for _, r in df_config.iterrows()}
+
+    # Costos fijos del mes (misma lógica que resumen_mensual)
+    uber      = float(config.get("uber", 0))
+    etpay     = float(config.get("etpay", 0))
+    contador  = float(config.get("contador", 0))
+    banco     = float(config.get("banco", 0))
+    adwords   = float(config.get("adwords", 0))
+    otros     = float(config.get("otros", 0))
+    total_fijos = uber + etpay + contador + banco + adwords + otros
+
+    # Si no hay config de fijos, usar el valor conocido
+    if total_fijos == 0:
+        total_fijos = 1445010
+
+    # Métricas del mes
+    pedidos   = len(df_mes)
+    ingresos  = int(df_mes["total"].sum())
+    ticket    = round(ingresos / pedidos) if pedidos > 0 else 0
+
+    # Costos variables
+    df_mes["costo_eroshop"]  = pd.to_numeric(df_mes.get("costo_eroshop", 0), errors="coerce").fillna(0)
+    df_mes["despacho_costo"] = pd.to_numeric(df_mes.get("despacho_costo", 0), errors="coerce").fillna(0)
+    df_mes["costo_bolsas"]   = pd.to_numeric(df_mes.get("costo_bolsas", 0), errors="coerce").fillna(0)
+    df_mes["costo_stickers"] = pd.to_numeric(df_mes.get("costo_stickers", 0), errors="coerce").fillna(0)
+    df_mes["costo_comision"] = pd.to_numeric(df_mes.get("costo_comision", 0), errors="coerce").fillna(0)
+
+    costo_eroshop  = int(df_mes["costo_eroshop"].sum())
+    costo_despacho = int(df_mes["despacho_costo"].sum())
+    costo_bolsas   = int(df_mes["costo_bolsas"].sum())
+    costo_stickers = int(df_mes["costo_stickers"].sum())
+    costo_comision = int(df_mes["costo_comision"].sum())
+    costo_variable_total = costo_eroshop + costo_despacho + costo_bolsas + costo_stickers + costo_comision
+
+    rent_variable = ingresos - costo_variable_total
+    pct_rv = round(rent_variable / ingresos * 100, 2) if ingresos > 0 else 0
+    rent_real = rent_variable - total_fijos
+    pct_rr = round(rent_real / ingresos * 100, 2) if ingresos > 0 else 0
+
+    nueva_fila = [
+        periodo_actual,       # A: periodo
+        año_actual,           # B: año
+        mes_actual,           # C: mes
+        pedidos,              # D: pedidos
+        ingresos,             # E: ingresos
+        ticket,               # F: ticket_promedio
+        costo_eroshop,        # G: costo_eroshop
+        costo_despacho,       # H: costo_despacho
+        costo_bolsas,         # I: costo_bolsas
+        costo_stickers,       # J: costo_stickers
+        costo_comision,       # K: costo_comision
+        costo_variable_total, # L: costo_variable_total
+        rent_variable,        # M: rentabilidad_variable
+        pct_rv,               # N: pct_rent_variable
+        uber,                 # O: uber
+        etpay,                # P: etpay
+        contador,             # Q: contador
+        banco,                # R: banco
+        adwords,              # S: adwords
+        otros,                # T: otros
+        int(total_fijos),     # U: total_fijos
+        rent_real,            # V: rentabilidad_real
+        pct_rr,               # W: pct_rent_real
+    ]
+
+    # Buscar si ya existe el mes en resumen_mensual
+    ws_resumen = sheet_resultados.worksheet("resumen_mensual")
+    data = ws_resumen.get_all_values()
+    headers = data[0] if data else []
+
+    fila_existente = None
+    for i, fila in enumerate(data[1:], start=2):
+        if fila and str(fila[0]).replace('.0','').strip() == periodo_actual:
+            fila_existente = i
+            break
+
+    if fila_existente:
+        # Actualizar fila existente
+        ws_resumen.update(f"A{fila_existente}:W{fila_existente}", [nueva_fila])
+        print(f"✅ resumen_mensual actualizado — fila {fila_existente}: {periodo_actual}")
+    else:
+        # Agregar nueva fila al final
+        ws_resumen.append_rows([nueva_fila])
+        print(f"✅ resumen_mensual — nueva fila agregada: {periodo_actual}")
+
+    # Regenerar resumen_completo
+    regenerar_resumen_completo(sheet_resultados)
+
+
+def regenerar_resumen_completo(sheet_resultados):
+    MESES_N = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+    FIJOS   = 1445010
+
+    ws_ventas  = sheet_resultados.worksheet("ventas")
+    ws_resumen = sheet_resultados.worksheet("resumen_mensual")
+
+    # Leer ventas para 2022-2024
+    df_v = pd.DataFrame(ws_ventas.get_all_records())
+    df_v["fecha"] = pd.to_datetime(df_v["fecha"], errors="coerce")
+    df_v["total"] = pd.to_numeric(df_v["total"], errors="coerce").fillna(0)
+    estados_validos = {"Pagado", "acreditado"}
+    df_v = df_v[df_v["estado"].isin(estados_validos) & df_v["fecha"].notna()]
+    df_v = df_v[df_v["fecha"].dt.year < 2025]
+
+    meses_hist = {}
+    for _, r in df_v.iterrows():
+        key = (r["fecha"].year, r["fecha"].month)
+        if key not in meses_hist:
+            meses_hist[key] = {"pedidos":0,"ingresos":0}
+        meses_hist[key]["pedidos"]  += 1
+        meses_hist[key]["ingresos"] += r["total"]
+
+    rows = []
+    for (año, mes) in sorted(meses_hist.keys()):
+        m = meses_hist[(año,mes)]
+        ing = m["ingresos"]
+        ped = m["pedidos"]
+        if ing <= 0: continue
+        tk       = round(ing/ped) if ped>0 else 0
+        rv       = ing * 0.50
+        pct_rv   = 50.0
+        rr       = rv - FIJOS
+        pct_rr   = round(rr/ing*100, 2) if ing>0 else 0
+        periodo  = f"{MESES_N[mes-1]} {año}"
+        rows.append([periodo, año, mes, ped, int(ing), tk,
+                     int(rv), pct_rv, FIJOS, int(rr), pct_rr, True])
+
+    # Leer resumen_mensual (2025+)
+    data_r = ws_resumen.get_all_values()
+    for fila in data_r[1:]:
+        if not fila or not fila[0]: continue
+        try:
+            ing = float(fila[4]) if len(fila)>4 else 0
+            if ing <= 0: continue
+            periodo = str(fila[0]).replace('.0','').strip()
+            año     = int(float(fila[1])) if fila[1] else 0
+            mes     = int(float(fila[2])) if fila[2] else 0
+            ped     = int(float(fila[3])) if fila[3] else 0
+            tk      = int(float(fila[5])) if len(fila)>5 and fila[5] else 0
+            rv      = int(float(fila[12])) if len(fila)>12 and fila[12] else 0
+            pct_rv  = float(fila[13]) if len(fila)>13 and fila[13] else 0
+            tf      = int(float(fila[20])) if len(fila)>20 and fila[20] else FIJOS
+            rr      = int(float(fila[21])) if len(fila)>21 and fila[21] else 0
+            pct_rr  = float(fila[22]) if len(fila)>22 and fila[22] else 0
+            rows.append([periodo, año, mes, ped, int(ing), tk,
+                         rv, pct_rv, tf, rr, pct_rr, False])
+        except Exception as e:
+            print(f"⚠️ Error fila resumen_mensual: {e}")
+            continue
+
+    # Escribir resumen_completo
+    try:
+        rc = sheet_resultados.worksheet("resumen_completo")
+        rc.clear()
+    except:
+        rc = sheet_resultados.add_worksheet("resumen_completo", rows=200, cols=15)
+
+    headers = ["periodo","año","mes","pedidos","ingresos","ticket_promedio",
+               "rentabilidad_variable","pct_rent_variable","total_fijos",
+               "rentabilidad_real","pct_rent_real","estimado"]
+    rc.update("A1", [headers] + rows)
+    print(f"✅ resumen_completo regenerado — {len(rows)} meses")
+
 # ── MAIN ──────────────────────────────────────────────────────
 async def main():
     print("🚀 Iniciando automatización Belove...")
@@ -671,6 +870,8 @@ async def main():
         SHEET_RESULTADOS = "1Hm3O2bh1iZvJLdSfqoHTj5U82EBMCRcvQ0dsy3LtLNk"
         sheet_resultados = client.open_by_key(SHEET_RESULTADOS)
         ventas_nuevas = actualizar_ventas(sheet_resultados, sheet)
+        # Actualizar resumen del mes actual
+        actualizar_resumen_mes_actual(sheet_resultados)
         if ventas_nuevas > 0:
             enviar_slack(f"💰 *{ventas_nuevas} ventas nuevas registradas en Belove Resultados*")
 
