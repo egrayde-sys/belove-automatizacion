@@ -407,7 +407,22 @@ def procesar_cruce(df_eroshop, sheet):
 
     df_todos["precio_descuento_final"] = df_todos.apply(calcular_precio_descuento, axis=1)
     df_todos["precio_final"] = df_todos.apply(calcular_precio, axis=1)
-    df_todos["stock_final"] = df_todos["stock_eroshop"].apply(lambda x: int(x) if x else 0)
+    # Crear lookup de stock fijo
+    stocks_fijos = {}
+    if "stock_fijo" in df_costos.columns:
+        for _, r in df_costos.iterrows():
+            val = r.get("stock_fijo", "")
+            if val != "" and pd.to_numeric(val, errors="coerce") > 0:
+                stocks_fijos[str(r["sku"]).strip()] = int(val)
+
+    # Stock final — usa stock_fijo si existe, sino stock de Eroshop
+    def calcular_stock(row):
+        sku = str(row["sku"]).strip()
+        if sku in stocks_fijos:
+            return stocks_fijos[sku]
+        return int(row["stock_eroshop"]) if row["stock_eroshop"] else 0
+
+    df_todos["stock_final"] = df_todos.apply(calcular_stock, axis=1)
 
     df_exportar = df_todos[["id", "sku", "precio_final", "precio_descuento_final", "stock_final"]].copy()
     df_exportar.columns = ["id", "sku", "precio", "precio_descuento", "stock"]
