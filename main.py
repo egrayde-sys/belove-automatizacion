@@ -38,7 +38,10 @@ def enviar_slack(mensaje):
         else:
             print(f"⚠️ Slack error: {data.get('error')}")
     except Exception as e:
-        print(f"⚠️ Slack excepción: {e}")
+        print(f"⚠️ Error procesando packs: {e}")
+        import traceback
+        print(traceback.format_exc())
+        enviar_slack(f"⚠️ Error en packs: {str(e)}")
 
 # ── GOOGLE SHEETS ─────────────────────────────────────────────
 def conectar_sheets():
