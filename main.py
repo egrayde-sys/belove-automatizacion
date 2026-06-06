@@ -509,6 +509,87 @@ def procesar_cruce(df_eroshop, sheet):
     ]])
     print("✅ Historial actualizado")
 
+    # ── PROCESAR PACKS ────────────────────────────────────────
+    try:
+        ws_packs = sheet.worksheet("packs")
+        df_packs = pd.DataFrame(ws_packs.get_all_records())
+        df_packs = df_packs[df_packs["activo"].astype(str) == "1"].copy()
+        print(f"DEBUG packs activos: {len(df_packs)}")
+
+        # Lookup de precio y stock desde df_belove y df_resultado
+        precio_por_sku = {}
+        precio_desc_por_sku = {}
+        stock_por_sku = {}
+
+        for _, r in df_belove.iterrows():
+            sku = str(r["sku"]).strip()
+            precio_por_sku[sku] = int(r["precio"]) if r["precio"] else 0
+            precio_desc_por_sku[sku] = int(r["precio_descuento"]) if r["precio_descuento"] else 0
+            stock_por_sku[sku] = int(r["stock"]) if r["stock"] else 0
+
+        # Actualizar con stock fresco de Eroshop
+        for _, r in df_eroshop.iterrows():
+            sku = str(r["sku"]).strip()
+            stock_por_sku[sku] = int(r["stock"]) if r["stock"] else 0
+
+        packs_resultado = []
+        packs_sin_stock = []
+        packs_stock_bajo = []
+
+        for _, pack in df_packs.iterrows():
+            pack_sku = str(pack["pack_sku"]).strip()
+            nombre   = str(pack["nombre_pack"]).strip()
+            skus     = [str(pack.get(f"sku_{i}", "")).strip() for i in range(1, 4) if str(pack.get(f"sku_{i}", "")).strip()]
+            descuento_pct = float(pack.get("descuento_pct", 12)) / 100
+
+            # Buscar ID del pack en Belove
+            pack_id = buscar_id_belove(pack_sku)
+
+            # Calcular stock — mínimo entre componentes
+            stocks = [stock_por_sku.get(s, 0) for s in skus]
+            stock_pack = min(stocks) if stocks else 0
+
+            # Calcular precios
+            precio_lista = sum(precio_por_sku.get(s, 0) for s in skus)
+            precio_desc_base = sum(precio_desc_por_sku.get(s, 0) for s in skus)
+            precio_desc_pack = int(precio_desc_base * (1 - descuento_pct))
+            # Redondear a 990
+            precio_desc_pack = int(precio_desc_pack // 1000) * 1000 + 990
+            precio_lista_pack = int(precio_lista // 1000) * 1000 + 990
+
+            packs_resultado.append({
+                "id": pack_id,
+                "sku": pack_sku,
+                "precio": precio_lista_pack,
+                "precio_descuento": precio_desc_pack,
+                "stock": stock_pack
+            })
+
+            # Clasificar para Slack
+            componentes_info = " + ".join([f"SKU {s} (stock:{stock_por_sku.get(s,0)})" for s in skus])
+            if stock_pack == 0:
+                packs_sin_stock.append(f"🔴 {nombre} ({pack_sku}) — {componentes_info}")
+            elif stock_pack <= 3:
+                packs_stock_bajo.append(f"🟡 {nombre} ({pack_sku}) — stock:{stock_pack} — {componentes_info}")
+
+        # Agregar packs al exportar
+        df_packs_export = pd.DataFrame(packs_resultado)
+        df_exportar = pd.concat([df_exportar, df_packs_export], ignore_index=True)
+        print(f"DEBUG packs procesados: {len(packs_resultado)}")
+
+        # Slack packs
+        msg_packs = f"📦 *Resumen Packs ({len(packs_resultado)} activos):*\n"
+        if packs_sin_stock:
+            msg_packs += f"\n*Sin stock ({len(packs_sin_stock)}):*\n" + "\n".join(packs_sin_stock)
+        if packs_stock_bajo:
+            msg_packs += f"\n*Stock bajo ({len(packs_stock_bajo)}):*\n" + "\n".join(packs_stock_bajo)
+        if not packs_sin_stock and not packs_stock_bajo:
+            msg_packs += "✅ Todos los packs con stock OK"
+        enviar_slack(msg_packs)
+
+    except Exception as e:
+        print(f"⚠️ Error procesando packs: {e}")
+    
     return df_exportar, resumen
 
 # ── ACTUALIZAR GIST ───────────────────────────────────────────
