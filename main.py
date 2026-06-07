@@ -38,10 +38,7 @@ def enviar_slack(mensaje):
         else:
             print(f"⚠️ Slack error: {data.get('error')}")
     except Exception as e:
-        print(f"⚠️ Error procesando packs: {e}")
-        import traceback
-        print(traceback.format_exc())
-        enviar_slack(f"⚠️ Error en packs: {str(e)}")
+        print(f"⚠️ Slack excepción: {e}")
 
 # ── GOOGLE SHEETS ─────────────────────────────────────────────
 def conectar_sheets():
@@ -591,7 +588,9 @@ def procesar_cruce(df_eroshop, sheet):
         enviar_slack(msg_packs)
 
     except Exception as e:
+        import traceback
         print(f"⚠️ Error procesando packs: {e}")
+        print(traceback.format_exc())
     
     return df_exportar, resumen
 
