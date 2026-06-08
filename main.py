@@ -469,10 +469,14 @@ def procesar_cruce(df_eroshop, sheet):
         (df_belove["stock"] > 0)
     ][["id", "sku", "nombre", "stock"]].copy()
 
-    # Excluir SKUs que están en costos_especiales (productos China que no están en Eroshop)
+   # Excluir SKUs China y SKUs de packs
     skus_china = set(df_costos["sku"].astype(str).str.strip().tolist())
     productos_desaparecidos = productos_desaparecidos[
         ~productos_desaparecidos["sku"].astype(str).str.strip().isin(skus_china)
+    ]
+    # Excluir packs (SKUs que empiezan con PACK)
+    productos_desaparecidos = productos_desaparecidos[
+        ~productos_desaparecidos["sku"].astype(str).str.strip().str.upper().str.startswith("PACK")
     ]
 
     if len(productos_desaparecidos) > 0:
