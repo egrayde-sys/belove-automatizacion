@@ -532,6 +532,13 @@ def procesar_cruce(df_eroshop, sheet):
             sku = str(r["sku"]).strip()
             stock_por_sku[sku] = int(r["stock"]) if r["stock"] else 0
 
+        # Sobreescribir con stock_fijo de costos_especiales (tiene prioridad)
+        for _, r in df_costos.iterrows():
+            sku = str(r["sku"]).strip()
+            val = r.get("stock_fijo", "")
+            if val != "" and pd.to_numeric(val, errors="coerce") >= 0:
+                stock_por_sku[sku] = int(pd.to_numeric(val, errors="coerce"))
+
         packs_resultado = []
         packs_sin_stock = []
         packs_stock_bajo = []
@@ -577,14 +584,22 @@ def procesar_cruce(df_eroshop, sheet):
         df_exportar = pd.concat([df_exportar, df_packs_export], ignore_index=True)
         print(f"DEBUG packs procesados: {len(packs_resultado)}")
 
-        # Slack packs
+        # Slack packs — resumen completo
         msg_packs = f"📦 *Resumen Packs ({len(packs_resultado)} activos):*\n"
+
         if packs_sin_stock:
-            msg_packs += f"\n*Sin stock ({len(packs_sin_stock)}):*\n" + "\n".join(packs_sin_stock)
+            msg_packs += f"\n🔴 *Sin stock ({len(packs_sin_stock)}):*\n" + "\n".join(packs_sin_stock)
         if packs_stock_bajo:
-            msg_packs += f"\n*Stock bajo ({len(packs_stock_bajo)}):*\n" + "\n".join(packs_stock_bajo)
-        if not packs_sin_stock and not packs_stock_bajo:
-            msg_packs += "✅ Todos los packs con stock OK"
+            msg_packs += f"\n🟡 *Stock bajo ({len(packs_stock_bajo)}):*\n" + "\n".join(packs_stock_bajo)
+
+        # Resumen de todos los packs
+        msg_packs += f"\n\n📋 *Detalle completo:*\n"
+        for p in packs_resultado:
+            sku = p["sku"]
+            nombre_pack = next((str(pk["nombre_pack"]) for _, pk in df_packs.iterrows() if str(pk["pack_sku"]).strip() == sku), sku)
+            emoji = "🔴" if p["stock"] == 0 else "🟡" if p["stock"] <= 3 else "✅"
+            msg_packs += f"{emoji} {nombre_pack} — stock:{p['stock']} | desc:${p['precio_descuento']:,} | lista:${p['precio']:,}\n"
+
         enviar_slack(msg_packs)
 
     except Exception as e:
