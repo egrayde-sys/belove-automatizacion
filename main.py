@@ -655,7 +655,18 @@ async def main():
         df_eroshop, alertas_scraping = await scraping_eroshop()
         alertas.extend(alertas_scraping)
 
-        df_exportar, resumen = procesar_cruce(df_eroshop, sheet)
+        # Reintentar hasta 3 veces si Google Sheets falla
+        for intento in range(3):
+            try:
+                df_exportar, resumen = procesar_cruce(df_eroshop, sheet)
+                break
+            except Exception as e:
+                if "503" in str(e) or "unavailable" in str(e).lower():
+                    print(f"⚠️ Google Sheets 503 — reintentando en 60s (intento {intento+1}/3)")
+                    time.sleep(60)
+                    client, sheet = conectar_sheets()
+                else:
+                    raise e
         print(f"📊 Resumen: {resumen}")
 
         url_json = actualizar_gist(df_exportar)
