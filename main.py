@@ -661,7 +661,7 @@ async def main():
                 df_exportar, resumen = procesar_cruce(df_eroshop, sheet)
                 break
             except Exception as e:
-                if "503" in str(e) or "unavailable" in str(e).lower():
+                if "503" in str(e) or "500" in str(e) or "unavailable" in str(e).lower() or "internal error" in str(e).lower():
                     print(f"⚠️ Google Sheets 503 — reintentando en 60s (intento {intento+1}/3)")
                     time.sleep(60)
                     client, sheet = conectar_sheets()
