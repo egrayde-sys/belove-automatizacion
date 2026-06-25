@@ -176,7 +176,7 @@ async def scraping_eroshop():
         # Scraping 1: /catalogo (15 páginas)
         for pg in range(1, 16):
             url = f"{BASE_URL}/catalogo" if pg == 1 else f"{BASE_URL}/catalogo?page={pg}"
-try:
+            try:
                 await page.goto(url, timeout=60000)
                 await page.wait_for_timeout(DELAY)
                 links = await page.query_selector_all("h3 a")
