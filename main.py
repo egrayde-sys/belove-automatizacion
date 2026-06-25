@@ -176,9 +176,16 @@ async def scraping_eroshop():
         # Scraping 1: /catalogo (15 páginas)
         for pg in range(1, 16):
             url = f"{BASE_URL}/catalogo" if pg == 1 else f"{BASE_URL}/catalogo?page={pg}"
-            await page.goto(url)
-            await page.wait_for_timeout(DELAY)
-            links = await page.query_selector_all("h3 a")
+try:
+                await page.goto(url, timeout=60000)
+                await page.wait_for_timeout(DELAY)
+                links = await page.query_selector_all("h3 a")
+            except Exception as e:
+                print(f"  ⚠️ Timeout en {url}, reintentando...")
+                await page.wait_for_timeout(5000)
+                await page.goto(url, timeout=60000)
+                await page.wait_for_timeout(DELAY)
+                links = await page.query_selector_all("h3 a")
             for link in links:
                 href = await link.get_attribute("href")
                 if href:
@@ -194,9 +201,16 @@ async def scraping_eroshop():
         urls_antes = len(product_urls)
         for pg in range(1, 14):
             url = f"{BASE_URL}/fabricante" if pg == 1 else f"{BASE_URL}/fabricante?page={pg}"
-            await page.goto(url)
-            await page.wait_for_timeout(DELAY)
-            links = await page.query_selector_all(".product-block a")
+            try:
+                await page.goto(url, timeout=60000)
+                await page.wait_for_timeout(DELAY)
+                links = await page.query_selector_all(".product-block a")
+            except Exception as e:
+                print(f"  ⚠️ Timeout en {url}, reintentando...")
+                await page.wait_for_timeout(5000)
+                await page.goto(url, timeout=60000)
+                await page.wait_for_timeout(DELAY)
+                links = await page.query_selector_all(".product-block a")
             for link in links:
                 href = await link.get_attribute("href")
                 if href and not href.endswith((".jpg", ".png", ".gif")):
