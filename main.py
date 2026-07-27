@@ -713,9 +713,18 @@ if __name__ == "__main__":
         result = asyncio.run(main())
         print(f"Resultado: {result}")
 
+        if result.get("status") == "error":
+            # Si falló por error temporal, reintenta en 5 minutos
+            mensaje_error = result.get("mensaje", "")
+            if any(code in mensaje_error for code in ["503", "500", "unavailable", "internal error"]):
+                print("⚠️ Error temporal detectado — reintentando en 5 minutos...")
+                time.sleep(300)
+                continue
+
+        # Esperar hasta las 9am Railway (5am Chile)
         ahora = datetime.now()
         manana_8am = ahora.replace(hour=9, minute=0, second=0, microsecond=0)
-        if ahora.hour >= 8:
+        if ahora.hour >= 9:
             import datetime as dt
             manana_8am = manana_8am + dt.timedelta(days=1)
 
