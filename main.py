@@ -438,8 +438,8 @@ def procesar_cruce(df_eroshop, sheet):
 
     df_todos["stock_final"] = df_todos.apply(calcular_stock, axis=1)
 
-    df_exportar = df_todos[["id", "sku", "precio_final", "precio_descuento_final", "stock_final"]].copy()
-    df_exportar.columns = ["id", "sku", "precio", "precio_descuento", "stock"]
+    df_exportar = df_todos[["id", "sku", "precio_final", "precio_descuento_final", "stock_final", "costo_bruto"]].copy()
+    df_exportar.columns = ["id", "sku", "precio", "precio_descuento", "stock", "costo"]
     df_exportar = df_exportar.fillna(0)
 
     resumen = {
